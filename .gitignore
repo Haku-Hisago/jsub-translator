@@ -1,0 +1,53 @@
+# ── Secrets ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.env.bak
+
+# ── User glossary override ───────────────────────────────
+jpop_glossary.json
+
+# ── Python ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ── Build artifacts ──────────────────────────────────────
+build/
+dist/
+_build/
+*.exe.bak
+*.bak-*
+*.orig-*
+*.tmp
+# Editor backups — kept OUT of src/ on purpose: the spec's datas entry
+# ('src', 'src') bundles the whole directory, so anything parked there
+# ships inside the EXE. See build.bat step [2b/4].
+_backups/
+
+# ── Project-local Python env + runtime temp (kept off C:) ─
+.venv/
+venv/
+.runtime/
+.pip-cache/
+
+# ── CUDA runtime DLLs (~640 MB, fetched locally) ─────────
+_cuda_dlls/
+
+# ── Whisper models (multi-GB) ────────────────────────────
+models/
+
+# ── Runtime output ───────────────────────────────────────
+output/
+
+# ── Logs ─────────────────────────────────────────────────
+*.log
+
+# ── Upload / output / api areas ──────────────────────────
+# upload/ 和 uploads/：上传区临时缓冲；output/：本工具生成产物
+# api/：预留（当前项目未使用），防止未来误提交
+upload/
+uploads/
+api/

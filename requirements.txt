@@ -1,0 +1,14 @@
+faster-whisper>=1.0.0
+yt-dlp>=2024.0.0
+openai>=1.0.0
+anthropic>=0.30.0
+gradio>=4.0.0
+flask>=3.0.0
+python-dotenv>=1.0.0
+# 说话人识别（声纹分离）。纯 ONNX Runtime、CPU 推理，不需要 torch。
+# 用的是 pyannote segmentation-3.0 的 ONNX 导出 + 3D-Speaker 声纹模型。
+sherpa-onnx>=1.13.8
+
+# 可选：pyannote.audio 后端（体积约 3GB，需 HuggingFace Token）。
+# 只有把 DIARIZE_BACKEND 设为 pyannote 时才需要，默认的 sherpa 不用装：
+#   pyannote.audio>=4.0.0

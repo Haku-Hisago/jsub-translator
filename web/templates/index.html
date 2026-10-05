@@ -1,0 +1,1242 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="color-scheme" content="dark"/>
+<meta name="description" content="把日语视频变成中文字幕：多模型识别、说话人分离、LLM 翻译与校对，输出 ASS 字幕。"/>
+<title>jsub-translator — 日文字幕工作台</title>
+<!-- 内联 SVG 图标：不额外发请求，也就不会有 /favicon.ico 的 404 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23d2f24b'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='16' font-weight='700' fill='%231a2000' text-anchor='middle'%3EjS%3C/text%3E%3C/svg%3E"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css"/>
+<style>
+/* ═══════════════════════════════════════════════════════════
+   1 · 设计令牌
+   暗色「字幕工作室」：墨蓝底 + 柠檬强调色（避开 AI 紫蓝渐变）
+   ═══════════════════════════════════════════════════════════ */
+:root{
+  --ink-900:#0a0c11; --ink-800:#0e1119; --ink-700:#131824;
+  --ink-600:#182031; --ink-500:#1f293c;
+  --line-1:#212a3a; --line-2:#2c3849;
+  --tx-1:#e9edf5; --tx-2:#a7b2c6; --tx-3:#78859b;
+  --cit-400:#e3ff6a; --cit-500:#d2f24b; --cit-600:#b6d92f;
+  --cit-ink:#1a2000;
+  --ok:#5fd68a; --warn:#f0b849; --bad:#ff6f6f; --info:#69b7ff;
+  /* 字体栈顺序有讲究：拉丁字体不含 CJK 字形，中文会落到栈里**第一个有 CJK 的字体**。
+     页面是 zh-CN，所以简体中文衬线必须排在日文衬线**之前** ——
+     否则汉字会用日文字形变体（直 / 骨 / 令 等写法不同）。
+     拉丁字体在前、CJK 字体按 zh→ja 排、最后兜底 generic。 */
+  --f-display:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,
+              "Noto Serif SC","Source Han Serif SC","Songti SC","Noto Serif JP",serif;
+  --f-body:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",
+           "Microsoft YaHei","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono","Cascadia Code",ui-monospace,Consolas,monospace;
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:24px;
+  --s-6:32px; --s-7:48px; --s-8:64px; --s-9:96px;
+  --r-1:6px; --r-2:10px; --r-3:14px; --r-4:20px;
+  --z-sticky:200; --z-overlay:300;
+  --ease:cubic-bezier(.22,.61,.36,1);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{overflow-x:clip}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ink-900); color:var(--tx-1);
+  font-family:var(--f-body); font-size:15px; line-height:1.7;
+  -webkit-font-smoothing:antialiased;
+  background-image:
+    radial-gradient(1100px 520px at 82% -12%,rgba(210,242,75,.07),transparent 62%),
+    radial-gradient(760px 420px at 6% 4%,rgba(105,183,255,.05),transparent 60%);
+  background-attachment:fixed;
+}
+h1,h2,h3,h4,p{margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+svg{display:block}
+
+:focus-visible{outline:2px solid var(--cit-500);outline-offset:2px;border-radius:var(--r-1)}
+::selection{background:var(--cit-500);color:var(--cit-ink)}
+
+.wrap{width:100%;max-width:1240px;margin:0 auto;padding:0 var(--s-5)}
+@media(max-width:640px){.wrap{padding:0 var(--s-4)}}
+
+/* ═══════════════════════════════════════════════════════════
+   2 · 顶部工具条
+   ═══════════════════════════════════════════════════════════ */
+.topbar{
+  position:sticky;top:0;z-index:var(--z-sticky);
+  background:rgba(10,12,17,.82);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line-1);
+}
+.topbar__in{display:flex;align-items:center;gap:var(--s-4);min-height:60px}
+.brand{display:flex;align-items:center;gap:var(--s-3);flex-shrink:0}
+.brand__mark{
+  width:30px;height:30px;border-radius:9px;flex:none;
+  background:linear-gradient(150deg,var(--cit-400),var(--cit-600));
+  color:var(--cit-ink);display:grid;place-items:center;
+  font-family:var(--f-mono);font-size:13px;font-weight:700;letter-spacing:-.04em;
+}
+.brand__txt{font-family:var(--f-mono);font-size:13.5px;letter-spacing:.02em;white-space:nowrap}
+.brand__sub{color:var(--tx-3)}
+@media(max-width:520px){.brand__sub{display:none}}
+.topbar__spacer{margin-left:auto}
+.health{
+  display:inline-flex;align-items:center;gap:var(--s-2);
+  font-family:var(--f-mono);font-size:11.5px;color:var(--tx-2);
+  border:1px solid var(--line-1);border-radius:999px;padding:5px 12px;white-space:nowrap;
+}
+.health__dot{width:6px;height:6px;border-radius:50%;background:var(--tx-3);flex:none}
+.health[data-state="ok"] .health__dot{background:var(--ok);box-shadow:0 0 0 3px rgba(95,214,138,.14)}
+.health[data-state="warn"] .health__dot{background:var(--warn);box-shadow:0 0 0 3px rgba(240,184,73,.14)}
+.health[data-state="bad"] .health__dot{background:var(--bad);box-shadow:0 0 0 3px rgba(255,111,111,.14)}
+/* 320px 窄屏：收紧间距，避免状态胶囊溢出右边界 */
+@media(max-width:360px){
+  .topbar__in{gap:var(--s-2)}
+  .brand{gap:var(--s-2)}
+  .health{padding:4px 9px;font-size:11px}
+}
+
+/* ═══════════════════════════════════════════════════════════
+   3 · 首屏（编辑式陈述，非营销 hero）
+   ═══════════════════════════════════════════════════════════ */
+.hero{padding:var(--s-8) 0 var(--s-6)}
+@media(max-width:768px){.hero{padding:var(--s-7) 0 var(--s-5)}}
+.hero__grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);
+  gap:var(--s-7);align-items:end}
+@media(max-width:900px){.hero__grid{grid-template-columns:minmax(0,1fr);gap:var(--s-6)}}
+.hero__eyebrow{
+  font-family:var(--f-mono);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--cit-500);display:flex;align-items:center;gap:var(--s-3);margin-bottom:var(--s-4);
+}
+.hero__eyebrow::after{content:"";height:1px;flex:1;background:linear-gradient(90deg,var(--line-2),transparent)}
+.hero__title{
+  font-family:var(--f-display);font-weight:400;
+  font-size:clamp(38px,6.4vw,74px);line-height:1.04;letter-spacing:-.02em;
+}
+.hero__title em{font-style:normal;color:var(--cit-500)}
+.hero__lede{margin-top:var(--s-5);color:var(--tx-2);font-size:15.5px;max-width:44ch}
+.hero__meta{margin-top:var(--s-6);display:flex;flex-wrap:wrap;gap:var(--s-2) var(--s-3)}
+.chip{
+  font-family:var(--f-mono);font-size:11.5px;color:var(--tx-2);
+  border:1px solid var(--line-1);border-radius:999px;padding:5px 12px;
+  background:var(--ink-800);white-space:nowrap;
+}
+
+/* 输出示例：真实产物形态（JP 原文 + CN 译文），不加任何假窗口边框 */
+.samp{display:flex;flex-direction:column;gap:var(--s-4)}
+.samp__cap{
+  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--tx-3);display:flex;align-items:center;gap:var(--s-3);margin-bottom:var(--s-4);
+}
+.samp__cap::after{content:"";height:1px;flex:1;background:var(--line-1)}
+.samp__row{padding-left:var(--s-4);border-left:2px solid var(--line-2)}
+.samp__jp{font-size:14px;line-height:1.65;color:var(--tx-2)}
+.samp__cn{font-size:14.5px;line-height:1.7;color:var(--cit-400);margin-top:2px}
+.samp__spk{
+  font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;
+  color:var(--tx-3);text-transform:uppercase;margin-bottom:var(--s-1);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   4 · 工作台骨架：不对称两栏（左主右辅）
+   ═══════════════════════════════════════════════════════════ */
+.bench{
+  display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);
+  gap:var(--s-5);align-items:start;
+}
+@media(max-width:1000px){.bench{grid-template-columns:minmax(0,1fr)}}
+.bench__col{display:flex;flex-direction:column;gap:var(--s-5);min-width:0}
+
+.panel{
+  background:linear-gradient(180deg,var(--ink-800),var(--ink-700));
+  border:1px solid var(--line-1);border-radius:var(--r-3);
+  overflow:hidden;
+}
+.panel--quiet{background:var(--ink-800);opacity:.96}
+.panel__hd{
+  display:flex;align-items:center;gap:var(--s-3);
+  padding:var(--s-4) var(--s-5);border-bottom:1px solid var(--line-1);
+}
+.panel__t{font-size:14.5px;font-weight:600;letter-spacing:.01em}
+.panel__note{margin-left:auto;font-size:11.5px;color:var(--tx-3);font-family:var(--f-mono)}
+.panel__bd{padding:var(--s-5)}
+@media(max-width:640px){.panel__hd{padding:var(--s-3) var(--s-4)}.panel__bd{padding:var(--s-4)}}
+
+/* ═══════════════════════════════════════════════════════════
+   5 · 表单
+   ═══════════════════════════════════════════════════════════ */
+.field{margin-bottom:var(--s-5)}
+.field:last-child{margin-bottom:0}
+.field__lb{
+  display:block;font-size:12.5px;font-weight:600;color:var(--tx-2);
+  margin-bottom:var(--s-2);letter-spacing:.01em;
+}
+.field__hint{margin-top:var(--s-2);font-size:11.5px;color:var(--tx-3);line-height:1.6}
+
+.inp,.sel{
+  width:100%;background:var(--ink-900);color:var(--tx-1);
+  border:1px solid var(--line-2);border-radius:var(--r-2);
+  padding:11px var(--s-4);transition:border-color .15s var(--ease),box-shadow .15s var(--ease);
+}
+.inp::placeholder{color:var(--tx-3)}
+.inp:hover,.sel:hover{border-color:var(--ink-500)}
+.inp:focus,.sel:focus{
+  outline:none;border-color:var(--cit-500);
+  box-shadow:0 0 0 3px rgba(210,242,75,.16);
+}
+.inp:disabled,.sel:disabled{opacity:.5;cursor:not-allowed}
+.sel{appearance:none;cursor:pointer;padding-right:var(--s-7);
+  background-image:linear-gradient(45deg,transparent 50%,var(--tx-3) 50%),
+                   linear-gradient(135deg,var(--tx-3) 50%,transparent 50%);
+  background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;
+}
+.sel option{background:var(--ink-700);color:var(--tx-1)}
+
+.inp-group{display:flex;gap:var(--s-2)}
+.inp-group .inp{flex:1;min-width:0}
+
+/* 文件选择：把原生控件做成投放区。
+   注意 .drop 挂在 label 元素上，而 label 默认 display:inline —— 不显式改 block，
+   内部的绝对定位 input 会把行盒撑出诡异的空档。 */
+.drop{
+  display:block;position:relative;
+  border:1px dashed var(--line-2);border-radius:var(--r-2);
+  padding:var(--s-5) var(--s-4);text-align:center;cursor:pointer;
+  background:var(--ink-900);transition:border-color .15s var(--ease),background .15s var(--ease);
+}
+.drop:hover{border-color:var(--cit-600);background:rgba(210,242,75,.03)}
+/* 输入铺满整个区域：既吃掉点击，也接住拖放；opacity:0 保证不露原生按钮 */
+.drop input[type=file]{
+  position:absolute;inset:0;width:100%;height:100%;
+  opacity:0;cursor:pointer;font-size:0;
+}
+.drop__ic{font-size:22px;color:var(--tx-3);margin-bottom:var(--s-2)}
+.drop__t{font-size:13.5px;color:var(--tx-2)}
+.drop__t b{color:var(--cit-500);font-weight:600}
+.drop__s{font-size:11px;color:var(--tx-3);margin-top:var(--s-1);font-family:var(--f-mono)}
+.drop.is-set{border-style:solid;border-color:var(--cit-600);background:rgba(210,242,75,.05)}
+.drop.is-set .drop__ic{color:var(--cit-500)}
+
+.or{display:flex;align-items:center;gap:var(--s-3);margin:var(--s-4) 0;color:var(--tx-3);font-size:11.5px}
+.or::before,.or::after{content:"";height:1px;flex:1;background:var(--line-1)}
+
+/* 开关 */
+.sw{display:flex;align-items:flex-start;gap:var(--s-3);cursor:pointer;
+    padding:var(--s-3) 0;border-bottom:1px solid var(--line-1)}
+.sw:last-of-type{border-bottom:0}
+.sw input{position:absolute;opacity:0;width:0;height:0}
+.sw__track{
+  width:36px;height:21px;border-radius:999px;background:var(--ink-500);
+  flex:none;margin-top:2px;position:relative;transition:background .18s var(--ease);
+}
+.sw__track::after{
+  content:"";position:absolute;top:2.5px;left:2.5px;width:16px;height:16px;border-radius:50%;
+  background:var(--tx-2);transition:transform .18s var(--ease),background .18s var(--ease);
+}
+.sw input:checked + .sw__track{background:var(--cit-600)}
+.sw input:checked + .sw__track::after{transform:translateX(15px);background:var(--cit-ink)}
+.sw input:focus-visible + .sw__track{outline:2px solid var(--cit-500);outline-offset:2px}
+.sw__body{min-width:0}
+.sw__t{font-size:13.5px;color:var(--tx-1)}
+.sw__d{font-size:11.5px;color:var(--tx-3);margin-top:2px;line-height:1.55}
+
+/* ═══════════════════════════════════════════════════════════
+   6 · 按钮
+   ═══════════════════════════════════════════════════════════ */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:var(--s-2);
+  border:1px solid transparent;border-radius:var(--r-2);
+  padding:10px var(--s-4);font-size:13.5px;font-weight:600;
+  cursor:pointer;white-space:nowrap;
+  transition:transform .1s var(--ease),background .15s var(--ease),
+             border-color .15s var(--ease),box-shadow .15s var(--ease);
+}
+.btn:active{transform:scale(.98)}
+.btn:disabled{opacity:.55;cursor:not-allowed;transform:none}
+.btn--primary{
+  background:linear-gradient(150deg,var(--cit-400),var(--cit-600));
+  color:var(--cit-ink);width:100%;padding:14px var(--s-5);font-size:15px;
+  box-shadow:0 6px 18px -8px rgba(210,242,75,.5);
+}
+.btn--primary:hover:not(:disabled){box-shadow:0 10px 26px -10px rgba(210,242,75,.62)}
+.btn--ghost{background:var(--ink-700);border-color:var(--line-2);color:var(--tx-2)}
+.btn--ghost:hover:not(:disabled){border-color:var(--cit-600);color:var(--tx-1)}
+.btn--danger{background:transparent;border-color:rgba(255,111,111,.4);color:var(--bad)}
+.btn--danger:hover:not(:disabled){background:rgba(255,111,111,.1);border-color:var(--bad)}
+.btn--sm{padding:7px var(--s-3);font-size:12.5px}
+/* 触控热区下限 44px：窄屏或粗指针设备上，小按钮会低于标准（实测 37px） */
+@media(max-width:768px),(pointer:coarse){
+  .btn--sm{min-height:44px;padding:11px var(--s-4)}
+  .crow input{width:20px;height:20px;margin-top:1px}
+}
+.btn__spin{
+  width:13px;height:13px;border-radius:50%;flex:none;
+  border:2px solid rgba(26,32,0,.3);border-top-color:var(--cit-ink);
+  animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ═══════════════════════════════════════════════════════════
+   7 · 进度 / 状态
+   ═══════════════════════════════════════════════════════════ */
+.stage{display:flex;align-items:center;gap:var(--s-3);margin-bottom:var(--s-4)}
+.stage__txt{font-size:13.5px;color:var(--tx-2);min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.track{height:5px;border-radius:999px;background:var(--ink-500);overflow:hidden}
+.track__fill{
+  height:100%;width:0;border-radius:999px;
+  background:linear-gradient(90deg,var(--cit-600),var(--cit-400));
+  transition:width .35s var(--ease);
+}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--cit-500);flex:none;
+  animation:pulse 1.4s var(--ease) infinite}
+@keyframes pulse{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
+
+/* ═══════════════════════════════════════════════════════════
+   8 · 预览
+   ═══════════════════════════════════════════════════════════ */
+.cues{max-height:62vh;overflow-y:auto;padding:var(--s-4)}
+.cue{
+  display:grid;grid-template-columns:64px minmax(0,1fr);gap:var(--s-4);
+  padding:var(--s-3) var(--s-4);border-radius:var(--r-2);
+  border-left:2px solid var(--line-2);background:var(--ink-800);
+  margin-bottom:var(--s-2);
+  transition:background .15s var(--ease),border-color .15s var(--ease);
+}
+.cue:hover{background:var(--ink-600);border-left-color:var(--cit-600)}
+.cue.is-missing{border-left-color:var(--bad);background:rgba(255,111,111,.05)}
+.cue__t{
+  font-family:var(--f-mono);font-size:11px;color:var(--tx-3);
+  padding-top:3px;letter-spacing:-.02em;
+}
+.cue__jp{font-size:15.5px;line-height:1.6;color:var(--tx-1)}
+.cue__cn{font-size:14px;line-height:1.7;color:var(--cit-400);margin-top:var(--s-1)}
+.cue__bad{font-size:12.5px;color:var(--bad)}
+.tag{
+  display:inline-block;font-family:var(--f-mono);font-size:10.5px;font-weight:600;
+  padding:1px 7px;border-radius:var(--r-1);margin-right:var(--s-2);vertical-align:1px;
+}
+@media(max-width:560px){
+  .cue{grid-template-columns:minmax(0,1fr);gap:var(--s-1)}
+  .cue__t{padding-top:0}
+}
+.pill{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:999px;
+  border:1px solid var(--line-2);color:var(--tx-2);background:var(--ink-700);
+}
+.pill--ok{color:var(--ok);border-color:rgba(95,214,138,.3);background:rgba(95,214,138,.08)}
+.pill--warn{color:var(--warn);border-color:rgba(240,184,73,.3);background:rgba(240,184,73,.08)}
+
+/* ═══════════════════════════════════════════════════════════
+   9 · 下载 / 缓存 / 提示
+   ═══════════════════════════════════════════════════════════ */
+.dls{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,210px));gap:var(--s-3)}
+.dl{
+  display:flex;align-items:center;gap:var(--s-3);
+  padding:var(--s-3) var(--s-4);border:1px solid var(--line-1);border-radius:var(--r-2);
+  background:var(--ink-800);font-size:13px;
+  transition:border-color .15s var(--ease),background .15s var(--ease),transform .15s var(--ease);
+}
+.dl:hover{border-color:var(--cit-600);background:var(--ink-600);transform:translateY(-2px)}
+.dl i{color:var(--cit-500);font-size:17px;flex:none}
+.dl__x{min-width:0}
+.dl__n{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dl__e{font-family:var(--f-mono);font-size:10.5px;color:var(--tx-3)}
+
+.crow{
+  display:flex;align-items:flex-start;gap:var(--s-3);
+  padding:var(--s-3);border:1px solid var(--line-1);border-radius:var(--r-2);
+  background:var(--ink-800);margin-bottom:var(--s-2);
+}
+.crow input{margin-top:3px;accent-color:var(--cit-500);width:15px;height:15px;flex:none}
+.crow__lb{flex:1;min-width:0;cursor:pointer}
+.crow__hd{display:flex;justify-content:space-between;gap:var(--s-3);flex-wrap:wrap}
+.crow__n{font-size:13px;font-weight:600}
+.crow__m{font-family:var(--f-mono);font-size:11.5px;color:var(--tx-3)}
+.crow__d{font-size:11.5px;color:var(--tx-3);margin-top:2px}
+
+.note{
+  display:flex;gap:var(--s-3);padding:var(--s-3) var(--s-4);
+  border-radius:var(--r-2);font-size:12.5px;line-height:1.65;
+}
+.note--warn{background:rgba(240,184,73,.08);border:1px solid rgba(240,184,73,.28);color:var(--warn)}
+.note--bad{background:rgba(255,111,111,.08);border:1px solid rgba(255,111,111,.28);color:var(--bad)}
+/* 后端的错误信息是**多行结构化**的（问题 + 原因 + 怎么办）。
+   默认 white-space 会把换行压成空格，把三段挤成一长句，可读性尽失。 */
+#error-message{white-space:pre-wrap}
+.note--ok{background:rgba(95,214,138,.08);border:1px solid rgba(95,214,138,.28);color:var(--ok)}
+.note i{flex:none;margin-top:2px}
+
+.foot{
+  margin-top:var(--s-8);padding:var(--s-5) 0 var(--s-7);
+  border-top:1px solid var(--line-1);
+  display:flex;justify-content:space-between;gap:var(--s-4);flex-wrap:wrap;
+  font-family:var(--f-mono);font-size:11.5px;color:var(--tx-3);
+}
+
+/* 路径行：标签与值分行，避免长路径挤成一团 */
+.pathrow{display:flex;gap:var(--s-3);align-items:baseline;padding:var(--s-2) 0}
+.pathrow + .pathrow{border-top:1px solid var(--line-1)}
+.pathrow b{
+  flex:none;font-size:11px;font-weight:600;color:var(--tx-3);
+  font-family:var(--f-mono);letter-spacing:.08em;min-width:28px;
+}
+.pathrow code{
+  font-family:var(--f-mono);font-size:11.5px;color:var(--tx-2);
+  word-break:break-all;line-height:1.55;
+}
+
+/* 渐进披露：低频且具破坏性的功能默认收起，避免与主流程抢注意力 */
+.disc > summary{
+  list-style:none;cursor:pointer;
+  display:flex;align-items:center;gap:var(--s-3);
+  padding:var(--s-4) var(--s-5);border-bottom:1px solid transparent;
+  transition:border-color .15s var(--ease);
+}
+.disc[open] > summary{border-bottom-color:var(--line-1)}
+.disc > summary::-webkit-details-marker{display:none}
+.disc > summary:hover .disc__t{color:var(--cit-500)}
+.disc__t{font-size:14.5px;font-weight:600;transition:color .15s var(--ease)}
+.disc__m{
+  margin-left:auto;font-family:var(--f-mono);font-size:11.5px;color:var(--tx-3);
+  display:flex;align-items:center;gap:var(--s-2);
+}
+.disc__arw{transition:transform .2s var(--ease);color:var(--tx-3);font-size:14px}
+.disc[open] .disc__arw{transform:rotate(90deg)}
+.disc__bd{padding:var(--s-5)}
+/* 面板内部的折叠块：内边距收窄，且不画分隔线 */
+.disc--inline > summary{padding:var(--s-3) 0;border-bottom:1px solid var(--line-1)}
+.disc--inline[open] > summary{border-bottom-color:var(--line-1)}
+.disc--inline .disc__bd{padding:var(--s-3) 0 0}
+@media(max-width:640px){
+  .disc > summary{padding:var(--s-3) var(--s-4)}
+  .disc__bd{padding:var(--s-4)}
+}
+@media(prefers-reduced-motion:reduce){.disc__arw{transition:none}}
+
+/* 工具类 */
+.hide{display:none !important}
+
+/* 动效降级：空间动效一律变即时/淡入 */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;
+    transition-duration:.01ms !important}
+  .btn:active{transform:none}
+  .dl:hover{transform:none}
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar__in">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true">jS</span>
+      <span class="brand__txt">jsub-translator<span class="brand__sub"> · 日文字幕工作台</span></span>
+    </div>
+    <span class="topbar__spacer"></span>
+    <span class="health" id="health-chip" data-state="idle" title="本地服务状态">
+      <span class="health__dot" aria-hidden="true"></span>
+      <span id="health-text">本地服务</span>
+    </span>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap hero__grid">
+    <div>
+      <p class="hero__eyebrow">Japanese → Chinese Subtitles</p>
+      <h1 class="hero__title">
+        听日语，<br/>
+        读<em>中文</em>。
+      </h1>
+      <p class="hero__lede">
+        多个识别模型并行听写、交叉比对，再由大模型融合成通顺日文，
+        逐句翻译并校对，最后导出可直接挂载的 ASS 字幕。
+      </p>
+      <div class="hero__meta">
+        {% for m in whisper_models %}<span class="chip">{{ m }}</span>{% endfor %}
+        <span class="chip">说话人分离</span>
+        <span class="chip">ASS 输出</span>
+      </div>
+    </div>
+    <div>
+      <p class="samp__cap">输出示例 · 双语 .ass</p>
+      <div class="samp">
+        <div class="samp__row">
+          <p class="samp__spk">S00 · 00:00:00.00</p>
+          <p class="samp__jp" lang="ja">これはご視聴ありがとうございました。</p>
+          <p class="samp__cn">感谢您的观看。</p>
+        </div>
+        <div class="samp__row">
+          <p class="samp__spk">S01 · 00:00:03.88</p>
+          <p class="samp__jp" lang="ja">次に、いろんな音声が出てきたようです。</p>
+          <p class="samp__cn">接下来，似乎出现了各种音频。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<main class="wrap">
+  <div class="bench">
+
+    <!-- ══ 左栏：主任务 ══ -->
+    <div class="bench__col">
+
+      <section class="panel">
+        <div class="panel__hd">
+          <h2 class="panel__t">视频源</h2>
+          <span class="panel__note">链接 或 本地文件</span>
+        </div>
+        <div class="panel__bd">
+          <div class="field">
+            <label class="field__lb" for="url-input">视频链接</label>
+            <input id="url-input" type="url" class="inp" autocomplete="off" spellcheck="false"
+                   placeholder="https://www.youtube.com/watch?v=..."/>
+            <p class="field__hint">支持 YouTube / Niconico / Bilibili 等 yt-dlp 可解析的站点。</p>
+          </div>
+
+          <div class="or">或</div>
+
+          <div class="field">
+            <label class="field__lb" for="file-input">上传本地视频 / 音频</label>
+            <label class="drop" id="drop-zone" for="file-input">
+              <input id="file-input" type="file"
+                     accept=".mp4,.mkv,.webm,.avi,.mov,.flv,.wmv,.ts,.m4v,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.wma"/>
+              <div class="drop__ic" aria-hidden="true"><i class="ti ti-upload"></i></div>
+              <div class="drop__t" id="drop-text">拖入文件，或 <b>点击选择</b></div>
+              <div class="drop__s" id="drop-sub">mp4 · mkv · mov · wav · mp3 等</div>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel hide" id="progress-section">
+        <div class="panel__bd">
+          <div class="stage">
+            <span class="pulse" aria-hidden="true"></span>
+            <span class="stage__txt" id="status-text">准备中…</span>
+          </div>
+          <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-track">
+            <div class="track__fill" id="progress-bar"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel hide" id="preview-section">
+        <div class="panel__hd">
+          <h2 class="panel__t">字幕预览</h2>
+          <span class="panel__note" id="preview-stats"></span>
+        </div>
+        <div class="cues" id="preview-content"></div>
+      </section>
+
+      <section class="panel hide" id="download-section">
+        <div class="panel__hd">
+          <h2 class="panel__t">导出</h2>
+          <span class="panel__note">.ass</span>
+        </div>
+        <div class="panel__bd">
+          <div class="dls">
+            <a id="dl-bilingual" class="dl" download>
+              <i class="ti ti-file-text" aria-hidden="true"></i>
+              <span class="dl__x"><span class="dl__n">双语字幕</span><span class="dl__e">日 + 中 · 同屏</span></span>
+            </a>
+            <a id="dl-split" class="dl" download>
+              <i class="ti ti-layout-rows" aria-hidden="true"></i>
+              <span class="dl__x"><span class="dl__n">双语分轨</span><span class="dl__e">便于 Aegisub 编辑</span></span>
+            </a>
+            <a id="dl-jp" class="dl" download>
+              <i class="ti ti-language" aria-hidden="true"></i>
+              <span class="dl__x"><span class="dl__n">仅日文</span><span class="dl__e">原文轨</span></span>
+            </a>
+            <a id="dl-cn" class="dl" download>
+              <i class="ti ti-language-hiragana" aria-hidden="true"></i>
+              <span class="dl__x"><span class="dl__n">仅中文</span><span class="dl__e">译文轨</span></span>
+            </a>
+            <a id="dl-speaker" class="dl hide" download>
+              <i class="ti ti-palette" aria-hidden="true"></i>
+              <span class="dl__x"><span class="dl__n">说话人分色</span><span class="dl__e">按角色着色</span></span>
+            </a>
+            <a id="dl-video" class="dl" download>
+              <i class="ti ti-video" aria-hidden="true"></i>
+              <span class="dl__x"><span class="dl__n">原视频 / 音频</span><span class="dl__e">下载缓存副本</span></span>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel panel--quiet">
+        <div class="panel__hd">
+          <h2 class="panel__t">输出位置</h2>
+          <span class="panel__note">结果保存到</span>
+        </div>
+        <div class="panel__bd">
+          <p class="field__hint" id="cache-path" style="word-break:break-all;margin-bottom:var(--s-4)"></p>
+          <div class="dls">
+            <button class="btn btn--ghost btn--sm" onclick="openOutputFolder()" type="button">
+              <i class="ti ti-folder-open" aria-hidden="true"></i> 打开输出文件夹
+            </button>
+            <button class="btn btn--ghost btn--sm" onclick="loadCacheStats()" type="button">
+              <i class="ti ti-refresh" aria-hidden="true"></i> 刷新
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div class="hide" id="error-section">
+        <div class="note note--bad" id="error-message" role="alert"></div>
+      </div>
+
+    </div>
+
+    <!-- ══ 右栏：设置 ══ -->
+    <div class="bench__col">
+      <section class="panel">
+        <div class="panel__hd">
+          <h2 class="panel__t">处理设置</h2>
+        </div>
+        <div class="panel__bd">
+          <div class="field">
+            <label class="field__lb" for="provider-select">翻译引擎</label>
+            <select id="provider-select" class="sel">
+              {# 可选引擎由服务端下发（config.VALID_PROVIDERS），这里不再手写一份。
+                 标签属展示文案，留在这里；新引擎没配标签时退回显示引擎名。 #}
+              {% set labels = {'deepseek': 'DeepSeek · 便宜快速（推荐）',
+                               'anthropic': 'Anthropic Claude · 质量优先'} %}
+              {% for p in providers %}
+              <option value="{{ p }}"{% if p == default_provider %} selected{% endif %}>{{ labels.get(p, p) }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="field__lb" for="apikey-input">API Key</label>
+            <div class="inp-group">
+              <input id="apikey-input" type="password" class="inp"
+                     autocomplete="off" spellcheck="false" placeholder="sk-..."/>
+              <button class="btn btn--ghost" type="button" id="apikey-toggle"
+                      onclick="toggleApiKey()" aria-label="显示或隐藏 API Key">显示</button>
+            </div>
+            <p class="field__hint" id="apikey-hint"></p>
+          </div>
+
+          <div class="field">
+            <label class="field__lb" for="speaker-count">说话人数量（可选）</label>
+            <input id="speaker-count" class="inp" type="number" min="1" max="20"
+                   inputmode="numeric" placeholder="留空 = 自动判断"/>
+            <p class="field__hint">已知有几个角色就填几，更准；不确定请留空。</p>
+          </div>
+
+          <details class="disc disc--inline">
+            <summary>
+              <span class="disc__t">高级选项</span>
+              <span class="disc__m">
+                <span id="adv-summary">3 项已开启</span>
+                <i class="ti ti-chevron-right disc__arw" aria-hidden="true"></i>
+              </span>
+            </summary>
+            <div class="disc__bd">
+              <label class="sw">
+                <input id="diarize-toggle" type="checkbox" checked/>
+                <span class="sw__track" aria-hidden="true"></span>
+                <span class="sw__body">
+                  <span class="sw__t">识别说话人</span>
+                  <span class="sw__d">区分角色，并让翻译按角色统一人称与语气。首次会加载约 44MB 声纹模型（纯 CPU）。</span>
+                </span>
+              </label>
+              <label class="sw">
+                <input id="context-toggle" type="checkbox" checked/>
+                <span class="sw__track" aria-hidden="true"></span>
+                <span class="sw__body">
+                  <span class="sw__t">上下文连贯</span>
+                  <span class="sw__d">跨批次携带上文语境，减少指代与语气断裂。</span>
+                </span>
+              </label>
+              <label class="sw">
+                <input id="review-toggle" type="checkbox" checked/>
+                <span class="sw__track" aria-hidden="true"></span>
+                <span class="sw__body">
+                  <span class="sw__t">翻译后校对</span>
+                  <span class="sw__d">额外跑一遍 LLM 连贯性检查，修正生硬句子。</span>
+                </span>
+              </label>
+            </div>
+          </details>
+
+          <button id="start-btn" class="btn btn--primary" onclick="startProcess()">
+            <i class="ti ti-player-play" aria-hidden="true"></i> 开始处理
+          </button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ══ 缓存清理（次级，降权处理） ══ -->
+  <details class="panel panel--quiet disc" id="cache-card" style="margin-top:var(--s-5)">
+    <summary>
+      <span class="disc__t">缓存清理</span>
+      <span class="disc__m">
+        <span id="cache-summary">展开查看</span>
+        <i class="ti ti-chevron-right disc__arw" aria-hidden="true"></i>
+      </span>
+    </summary>
+    <div class="disc__bd">
+      <div class="note note--warn hide" id="cache-warning" style="margin-bottom:var(--s-4)">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i><span id="cache-warning-text"></span>
+      </div>
+      <div id="cache-list"></div>
+      <div class="dls" style="margin-top:var(--s-4)">
+        <button class="btn btn--ghost btn--sm" onclick="cacheSelectAll(true)" type="button">全选</button>
+        <button class="btn btn--ghost btn--sm" onclick="cacheSelectAll(false)" type="button">清空选择</button>
+        <button class="btn btn--danger btn--sm" id="cache-clean-btn" onclick="cleanCache()" type="button">
+          <i class="ti ti-trash" aria-hidden="true"></i> 清理选中项
+        </button>
+      </div>
+      <p class="field__hint" id="cache-selected-info" style="margin-top:var(--s-3)"></p>
+      <p class="field__hint">
+        Whisper 模型不在此处清理。删掉后需重新下载，国内常失败。
+      </p>
+      <div id="cache-result" style="margin-top:var(--s-4)"></div>
+    </div>
+  </details>
+</main>
+
+<footer class="wrap foot">
+  <span>jsub-translator · 本地运行，音频不出本机</span>
+  <span id="foot-ver">ASS · sherpa-onnx · faster-whisper</span>
+</footer>
+
+<script>
+let jobId = null;
+let eventSource = null;
+
+/* ── API Key：仅存本机浏览器 ───────────────────────────── */
+const APIKEY_STORAGE = 'jsub_api_key';
+
+function providerLabel(p) {
+  return p === 'anthropic' ? 'Anthropic' : 'DeepSeek';
+}
+
+function updateApiKeyHint() {
+  const p = document.getElementById('provider-select').value;
+  const input = document.getElementById('apikey-input');
+  input.placeholder = (p === 'anthropic') ? 'sk-ant-...' : 'sk-...';
+  document.getElementById('apikey-hint').textContent =
+    providerLabel(p) + ' Key，留空则使用 .env 中的配置。仅保存在本机浏览器。';
+}
+
+function saveApiKey() {
+  const v = document.getElementById('apikey-input').value.trim();
+  try {
+    if (v) localStorage.setItem(APIKEY_STORAGE, v);
+    else localStorage.removeItem(APIKEY_STORAGE);
+  } catch (e) { /* 隐私模式下 localStorage 不可用，忽略 */ }
+}
+
+function toggleApiKey() {
+  const input = document.getElementById('apikey-input');
+  const btn = document.getElementById('apikey-toggle');
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.textContent = show ? '隐藏' : '显示';
+  btn.setAttribute('aria-label', show ? '隐藏 API Key' : '显示 API Key');
+}
+
+(function initApiKey() {
+  const input = document.getElementById('apikey-input');
+  try {
+    const saved = localStorage.getItem(APIKEY_STORAGE);
+    if (saved) input.value = saved;
+  } catch (e) { /* ignore */ }
+  input.addEventListener('input', saveApiKey);
+  document.getElementById('provider-select').addEventListener('change', updateApiKeyHint);
+  updateApiKeyHint();
+})();
+
+/* ── 工具 ─────────────────────────────────────────────── */
+function formatTime(s) {
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  const cs = Math.round((s - Math.floor(s)) * 100);
+  return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
+}
+
+function escapeHtml(t) {
+  const d = document.createElement('div');
+  d.textContent = t;
+  return d.innerHTML;
+}
+
+function show(el, on) {
+  if (el) el.classList.toggle('hide', !on);
+}
+
+// 统一解析后端响应：后端异常时可能回 HTML 或空体，
+// 直接 res.json() 会抛 "Unexpected token '<'"，真实错误被吞掉。
+async function readJson(resp) {
+  const text = await resp.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (_) {
+    const snippet = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+    throw new Error(
+      `服务器返回了非 JSON 响应（HTTP ${resp.status}）` +
+      (snippet ? `：${snippet}` : '') +
+      `\n可打开 /api/health 查看当前配置是否正常。`
+    );
+  }
+  if (!resp.ok && !(data && data.error)) {
+    throw new Error(`请求出错（HTTP ${resp.status}）`);
+  }
+  return data;
+}
+
+/* ── 本地文件选择：回显文件名 ──────────────────────────── */
+(function initDrop() {
+  const fileEl = document.getElementById('file-input');
+  const zone = document.getElementById('drop-zone');
+  const t = document.getElementById('drop-text');
+  const s = document.getElementById('drop-sub');
+  if (!fileEl || !zone) return;
+  const defT = t.textContent, defS = s.textContent;
+  fileEl.addEventListener('change', function () {
+    if (fileEl.files && fileEl.files.length) {
+      const f = fileEl.files[0];
+      t.textContent = f.name;
+      s.textContent = (f.size / 1048576).toFixed(1) + ' MB · 已选择';
+      zone.classList.add('is-set');
+    } else {
+      t.textContent = defT; s.textContent = defS;
+      zone.classList.remove('is-set');
+    }
+  });
+})();
+
+/* ── 高级选项：摘要行反映当前开启数，收起时也能看出状态 ── */
+(function initAdv() {
+  const ids = ['diarize-toggle', 'context-toggle', 'review-toggle'];
+  const sum = document.getElementById('adv-summary');
+  if (!sum) return;
+  const sync = function () {
+    const on = ids.filter(function (id) {
+      const el = document.getElementById(id);
+      return el && el.checked;
+    }).length;
+    sum.textContent = (on === ids.length) ? (on + ' 项已开启')
+      : (on === 0 ? '全部关闭' : on + '/' + ids.length + ' 项已开启');
+  };
+  ids.forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', sync);
+  });
+  sync();
+})();
+
+/* ── 启动任务 ─────────────────────────────────────────── */
+async function startProcess() {
+  const url = document.getElementById('url-input').value.trim();
+  const fileEl = document.getElementById('file-input');
+  const hasFile = fileEl && fileEl.files.length > 0;
+  const provider = document.getElementById('provider-select').value;
+  const apiKey = document.getElementById('apikey-input').value.trim();
+  const diarize = document.getElementById('diarize-toggle').checked;
+  const speakerCountRaw = (document.getElementById('speaker-count').value || '').trim();
+  const speakers = speakerCountRaw ? parseInt(speakerCountRaw, 10) : 0;
+  const context = document.getElementById('context-toggle').checked;
+  const review = document.getElementById('review-toggle').checked;
+
+  if (speakerCountRaw && (!Number.isInteger(speakers) || speakers < 1 || speakers > 20)) {
+    showError('说话人数量请填 1-20 之间的整数，或留空自动判断');
+    return;
+  }
+  if (!url && !hasFile) {
+    showError('请先填入视频链接，或选择一个本地视频 / 音频文件');
+    return;
+  }
+
+  const btn = document.getElementById('start-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="btn__spin" aria-hidden="true"></span> 处理中…';
+  show(document.getElementById('progress-section'), true);
+  show(document.getElementById('preview-section'), false);
+  show(document.getElementById('download-section'), false);
+  show(document.getElementById('error-section'), false);
+  setProgress(0);
+  document.getElementById('status-text').textContent = '准备中…';
+
+  try {
+    let filePath = '';
+    if (hasFile) {
+      document.getElementById('status-text').textContent = '上传文件中…';
+      const formData = new FormData();
+      formData.append('file', fileEl.files[0]);
+      const upResp = await fetch('/api/upload', { method: 'POST', body: formData });
+      const upData = await readJson(upResp);
+      if (upData.error) { showError(upData.error); return; }
+      filePath = upData.path;
+    }
+
+    document.getElementById('status-text').textContent = '提交任务…';
+    const resp = await fetch('/api/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, file_path: filePath, provider, api_key: apiKey,
+                             diarize, speakers, context, review }),
+    });
+    const data = await readJson(resp);
+    if (data.error) { showError(data.error); return; }
+
+    jobId = data.job_id;
+    listenProgress(jobId);
+  } catch (e) {
+    showError('请求失败：' + e.message);
+  }
+}
+
+function setProgress(pct) {
+  const n = Math.max(0, Math.min(100, Number(pct) || 0));
+  document.getElementById('progress-bar').style.width = n + '%';
+  const tr = document.getElementById('progress-track');
+  if (tr) tr.setAttribute('aria-valuenow', String(Math.round(n)));
+}
+
+/* ── 进度流 ───────────────────────────────────────────── */
+function listenProgress(id) {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`/api/progress/${id}`);
+
+  eventSource.onmessage = function (e) {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'progress') {
+      setProgress(msg.pct);
+      document.getElementById('status-text').textContent = `[${msg.stage}] ${msg.message}`;
+    } else if (msg.type === 'done') {
+      eventSource.close();
+      setProgress(100);
+      document.getElementById('status-text').textContent = '完成，正在加载预览…';
+      loadResult(id);
+    } else if (msg.type === 'error') {
+      eventSource.close();
+      showError(msg.message);
+    }
+  };
+  eventSource.onerror = function () { /* EventSource 会自动重连；终态由 /api/result 兜底 */ };
+}
+
+/* ── 结果 ─────────────────────────────────────────────── */
+async function loadResult(id) {
+  const resp = await fetch(`/api/result/${id}`);
+  const data = await readJson(resp);
+
+  // 任务已从内存淘汰（只保留最近 10 个）或 id 失效时，后端回 {error} 且不带 status。
+  // 不单独处理的话会落到下面 `status !== 'done'` 那条静默返回 ——
+  // 界面永远停在转圈，用户既看不到原因也无法重试。
+  if (data.error) { showError(data.error); return; }
+
+  // 任务失败时恢复「可重试」状态并显示原因；showError 负责复位按钮。
+  if (data.status === 'error') { showError(data.error || '处理失败'); return; }
+  if (data.status !== 'done') return;
+
+  show(document.getElementById('progress-section'), false);
+  const btn = document.getElementById('start-btn');
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-player-play" aria-hidden="true"></i> 开始处理';
+
+  const segs = data.segments || [];
+  let missing = 0;
+  let html = '';
+
+  // 颜色与缩写名均由服务端下发，与生成的 ASS 文件同源（前端不再自行计算）
+  // 用下标而非 segs.indexOf(s)：后者是 O(n²)，长视频（数千段）白白多绕一圈。
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i];
+    const cn = s.translated || '';
+    const isMissing = !cn || s.failed;
+    if (isMissing) missing++;
+    const spk = s.speaker || '';
+    const short = s.speaker_short || spk;
+    const color = s.color || '#a7b2c6';
+    const tag = spk
+      ? `<span class="tag" style="background:${color}22;color:${color};border:1px solid ${color}44">${escapeHtml(short)}</span>`
+      : '';
+    html += `
+      <div class="cue${isMissing ? ' is-missing' : ''}" style="border-left-color:${spk ? color : 'var(--line-2)'}">
+        <div class="cue__t">#${i + 1}<br/>${formatTime(s.start)}</div>
+        <div>
+          <div class="cue__jp" lang="ja">${tag}${escapeHtml(s.text)}</div>
+          <div class="cue__cn">${isMissing
+            ? '<span class="cue__bad">未翻译：该句在字幕中会标注失败原因</span>'
+            : escapeHtml(cn)}</div>
+        </div>
+      </div>`;
+  }
+  document.getElementById('preview-content').innerHTML =
+    html || '<p class="field__hint">没有解析到字幕段落。</p>';
+  show(document.getElementById('preview-section'), true);
+
+  let stats = `<span class="pill">${segs.length} 句</span>`;
+  if (data.speakers && data.speakers.length) {
+    stats += `<span class="pill">${data.speakers.length} 位说话人</span>`;
+  }
+  stats += missing
+    ? `<span class="pill pill--warn">${missing} 句未翻译</span>`
+    : `<span class="pill pill--ok">全部已翻译</span>`;
+  document.getElementById('preview-stats').innerHTML = stats;
+
+  const files = data.files || {};
+  const map = { 'dl-bilingual': 'bilingual', 'dl-split': 'bilingual_split',
+                'dl-jp': 'japanese', 'dl-cn': 'chinese',
+                'dl-speaker': 'bilingual_speaker_colored' };
+  for (const [elId, key] of Object.entries(map)) {
+    const a = document.getElementById(elId);
+    if (files[key]) {
+      a.href = `/api/download/${encodeURIComponent(files[key])}`;
+      show(a, true);
+    } else {
+      show(a, false);
+    }
+  }
+  const vid = document.getElementById('dl-video');
+  if (data.video_path) {
+    vid.href = `/api/download/${encodeURIComponent(data.video_path)}`;
+    show(vid, true);
+  } else {
+    show(vid, false);
+  }
+  show(document.getElementById('download-section'), true);
+}
+
+function showError(msg) {
+  const btn = document.getElementById('start-btn');
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-player-play" aria-hidden="true"></i> 开始处理';
+  show(document.getElementById('progress-section'), false);
+  document.getElementById('error-message').innerHTML =
+    '<i class="ti ti-alert-circle" aria-hidden="true"></i><span>' + escapeHtml(msg) + '</span>';
+  show(document.getElementById('error-section'), true);
+  document.getElementById('error-section').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/* ══════════════════════════════════════════════════════════
+   缓存清理（与上面的处理流程互不影响）
+   ══════════════════════════════════════════════════════════ */
+let cacheStats = null;
+
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + units[i];
+}
+
+async function loadCacheStats() {
+  const listEl = document.getElementById('cache-list');
+  try {
+    const resp = await fetch('/api/cache/stats');
+    cacheStats = await readJson(resp);
+    renderCacheStats();
+  } catch (e) {
+    if (listEl) {
+      listEl.innerHTML = '<div class="note note--bad"><i class="ti ti-alert-circle" aria-hidden="true"></i>'
+        + '<span>读取缓存信息失败：' + escapeHtml(e.message) + '</span></div>';
+    }
+  }
+}
+
+function renderCacheStats() {
+  if (!cacheStats) return;
+  document.getElementById('cache-path').innerHTML =
+    '<span class="pathrow"><b>输出</b><code>' + escapeHtml(cacheStats.output_dir || '—') + '</code></span>' +
+    '<span class="pathrow"><b>临时</b><code>' + escapeHtml(cacheStats.temp_dir || '—') + '</code></span>';
+
+  // 输出目录被误配成盘根/系统目录时服务端会拒绝清理，提前显示原因
+  const warnEl = document.getElementById('cache-warning');
+  if (warnEl) {
+    if (cacheStats.warning) {
+      document.getElementById('cache-warning-text').textContent = cacheStats.warning;
+      show(warnEl, true);
+    } else {
+      show(warnEl, false);
+    }
+  }
+
+  const cats = cacheStats.categories || [];
+
+  // 收起状态也要能看出「值不值得展开」
+  const sumEl = document.getElementById('cache-summary');
+  if (sumEl) {
+    const tn = cats.reduce((a, c) => a + c.count, 0);
+    const tb = cats.reduce((a, c) => a + c.bytes, 0);
+    sumEl.textContent = tn ? `${tn} 个文件 · ${fmtBytes(tb)}` : '暂无可清理内容';
+  }
+
+  if (cats.length === 0) {
+    document.getElementById('cache-list').innerHTML =
+      '<p class="field__hint">没有可清理的内容。</p>';
+    return;
+  }
+
+  let html = '';
+  for (const c of cats) {
+    const empty = (c.count === 0);
+    html += `
+      <div class="crow">
+        <input class="cache-cb" type="checkbox" value="${escapeHtml(c.key)}"
+               id="cache-${escapeHtml(c.key)}" ${empty ? 'disabled' : ''}/>
+        <label class="crow__lb" for="cache-${escapeHtml(c.key)}">
+          <span class="crow__hd">
+            <span class="crow__n">${escapeHtml(c.label)}</span>
+            <span class="crow__m">${c.count} 个 · ${fmtBytes(c.bytes)}</span>
+          </span>
+          <span class="crow__d">${escapeHtml(c.desc)}</span>
+        </label>
+      </div>`;
+  }
+  document.getElementById('cache-list').innerHTML = html;
+  updateCacheSelectionInfo();
+}
+
+function cacheSelectAll(on) {
+  document.querySelectorAll('.cache-cb').forEach(cb => { if (!cb.disabled) cb.checked = on; });
+  updateCacheSelectionInfo();
+}
+
+function cacheSelected() {
+  return Array.from(document.querySelectorAll('.cache-cb:checked')).map(cb => cb.value);
+}
+
+function updateCacheSelectionInfo() {
+  const keys = cacheSelected();
+  const el = document.getElementById('cache-selected-info');
+  if (!cacheStats || keys.length === 0) { el.textContent = ''; return; }
+  const sel = cacheStats.categories.filter(c => keys.includes(c.key));
+  const n = sel.reduce((a, c) => a + c.count, 0);
+  const b = sel.reduce((a, c) => a + c.bytes, 0);
+  el.textContent = `已选 ${n} 个文件 · ${fmtBytes(b)}`;
+}
+
+const cacheListEl = document.getElementById('cache-list');
+if (cacheListEl) cacheListEl.addEventListener('change', updateCacheSelectionInfo);
+
+async function openOutputFolder() {
+  try {
+    const resp = await fetch('/api/cache/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ which: 'output' }),
+    });
+    let data = {};
+    try { data = await resp.json(); } catch (_) { /* 非 JSON 响应 */ }
+    if (!resp.ok || data.error) {
+      alert('打开文件夹失败：' + (data.error || ('HTTP ' + resp.status)));
+      return;
+    }
+    const el = document.getElementById('cache-path');
+    if (el && data.path) {
+      el.innerHTML =
+        '<span class="pathrow"><b>已打开</b><code>' + escapeHtml(data.path) + '</code></span>' +
+        (cacheStats
+          ? '<span class="pathrow"><b>临时</b><code>' + escapeHtml(cacheStats.temp_dir || '—') + '</code></span>'
+          : '');
+    }
+  } catch (e) {
+    alert('打开文件夹失败：' + e.message);
+  }
+}
+
+async function cleanCache() {
+  const targets = cacheSelected();
+  if (targets.length === 0) { alert('请先勾选要清理的内容'); return; }
+  if (!cacheStats) return;
+
+  const sel = cacheStats.categories.filter(c => targets.includes(c.key));
+  const n = sel.reduce((a, c) => a + c.count, 0);
+  const b = sel.reduce((a, c) => a + c.bytes, 0);
+  const detail = sel.map(c => `  · ${c.label}（${c.count} 个，${fmtBytes(c.bytes)}）`).join('\n');
+
+  const ok = confirm(
+    '将永久删除以下内容，且无法恢复：\n\n' + detail +
+    `\n\n合计 ${n} 个文件，${fmtBytes(b)}。\n\n确定继续吗？`
+  );
+  if (!ok) return;
+
+  const box = document.getElementById('cache-result');
+  const btn = document.getElementById('cache-clean-btn');
+  btn.disabled = true;
+  box.innerHTML = '<p class="field__hint">清理中…</p>';
+
+  try {
+    const resp = await fetch('/api/cache/clean', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets }),
+    });
+    const data = await readJson(resp);
+    if (data.error) {
+      box.innerHTML = '<div class="note note--bad"><i class="ti ti-alert-circle" aria-hidden="true"></i>'
+        + '<span>' + escapeHtml(data.error) + '</span></div>';
+      return;
+    }
+    const removed = data.results.reduce((a, x) => a + x.removed, 0);
+    const freed = data.results.reduce((a, x) => a + x.freed, 0);
+    const errs = data.results.flatMap(x => x.errors || []);
+
+    let html = '<div class="note note--ok"><i class="ti ti-check" aria-hidden="true"></i>'
+      + `<span>已删除 ${removed} 个文件，释放 ${fmtBytes(freed)}</span></div>`;
+    if (errs.length) {
+      html += '<div class="note note--warn" style="margin-top:var(--s-2)">'
+        + '<i class="ti ti-alert-triangle" aria-hidden="true"></i><span>以下文件未能删除（可能正被占用）：<br>'
+        + errs.slice(0, 8).map(escapeHtml).join('<br>') + '</span></div>';
+    }
+    box.innerHTML = html;
+
+    if (data.stats) { cacheStats = data.stats; renderCacheStats(); }
+    else { await loadCacheStats(); }
+  } catch (e) {
+    box.innerHTML = '<div class="note note--bad"><i class="ti ti-alert-circle" aria-hidden="true"></i>'
+      + '<span>清理失败：' + escapeHtml(e.message) + '</span></div>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ── 启动自检：把服务端状态显示在顶栏 ─────────────────── */
+(async function checkHealth() {
+  const chip = document.getElementById('health-chip');
+  const txt = document.getElementById('health-text');
+  if (!chip) return;
+  try {
+    const d = await readJson(await fetch('/api/health'));
+    const modelsOk = d.models && d.models.ok;
+    const outOk = d.output_dir_writable;
+    const keyed = d.api_keys && Object.values(d.api_keys).some(k => k && k.configured);
+    if (!modelsOk) {
+      chip.dataset.state = 'bad';
+      txt.textContent = '模型未就绪';
+    } else if (!outOk) {
+      chip.dataset.state = 'bad';
+      txt.textContent = '输出目录不可写';
+    } else if (!keyed) {
+      chip.dataset.state = 'warn';
+      txt.textContent = '未配置 API Key';
+    } else {
+      chip.dataset.state = 'ok';
+      txt.textContent = '就绪';
+    }
+  } catch (_) {
+    chip.dataset.state = 'warn';
+    txt.textContent = '自检不可用';
+  }
+})();
+
+loadCacheStats();
+</script>
+</body>
+</html>
