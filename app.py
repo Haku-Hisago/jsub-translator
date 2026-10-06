@@ -140,6 +140,31 @@ def api_health():
 
     diarize_ok, diarize_reason = validate_diarization()
 
+    # 本地 Index-Translate 服务状态 —— 它没有 API Key 可以检查，
+    # 唯一有意义的自检就是「服务到底起没起」。不查的话，
+    # 用户只能等到跑任务时才看到 Connection refused。
+    try:
+        from src.config import probe_index_service, INDEX_BASE_URL, INDEX_MODEL
+        _idx_ok, _idx_detail, _idx_models = probe_index_service(timeout=2.0)
+        index_info = {
+            "running": _idx_ok,
+            "detail": _idx_detail,
+            "base_url": INDEX_BASE_URL,
+            "configured_model": INDEX_MODEL,
+            "served_models": _idx_models,
+            # 模型名对不上是高频坑：服务起着，但请求回 404 model not found
+            "model_matches": (not _idx_models) or (INDEX_MODEL in _idx_models),
+        }
+    except Exception as e:  # noqa: BLE001
+        index_info = {"running": None, "detail": f"检查失败: {e}"}
+
+    # 术语表状态 —— 用户改了 dictionary/*.yaml 后，这里能立刻看出有没有生效
+    try:
+        from src.glossary import glossary_stats
+        glossary_info = glossary_stats()
+    except Exception as e:  # noqa: BLE001
+        glossary_info = {"detail": f"检查失败: {e}"}
+
     # Whisper 模型是否找得到 —— 路径配错时这里能直接看出来
     try:
         from src.transcriber import diagnose_model_dir, _local_model_sizes
@@ -165,9 +190,13 @@ def api_health():
         "provider": TRANSLATION_PROVIDER,
         "env_files_loaded": [str(p) for p in getattr(_cfg, "ENV_FILES", [])],
         "api_keys": {
+            # index 不需要 key（本地服务），所以不列在这里，
+            # 它的可用性由下面的 index_service 表示。
             "deepseek": key_status("deepseek"),
             "anthropic": key_status("anthropic"),
         },
+        "index_service": index_info,
+        "glossary": glossary_info,
         "output_dir": str(out),
         "output_dir_writable": writable,
         "model_dir": str(_cfg.MODEL_DIR),

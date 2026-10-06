@@ -27,7 +27,7 @@
 | 模型目录 | `<root>\models` | **3.5 GB**：small / medium / large-v3-turbo |
 | 输出（源码版） | `<root>\output` | |
 | 输出（EXE 版） | `<root>\dist\output` | |
-| 测试 | 9 文件 / **326 断言** | 全绿 |
+| 测试 | 10 文件 / **399 断言** | 全绿 |
 | 说话人后端 | sherpa-onnx | CPU，可用 |
 
 **模型缓存明细**（`<root>\models\`）：
@@ -77,6 +77,57 @@
 ---
 
 ## 4. 最近变更
+
+### 2026-10-06 — 翻译引擎换成本地 Index-Translate-2B（DeepSeek 降为可选）
+
+**目标**：把默认翻译引擎从云端 DeepSeek 换成**本地** Index-Translate-2B
+（B站官方模型，基于 Qwen3.5），保留 DeepSeek 作为可选 / fallback。
+
+**没有重写任何东西**。原有架构里已经有 `BaseTranslator` 抽象 + 工厂，
+所以新增后端只是加一个类；下载 / Whisper / 说话人 / 融合 / ASS / UI 全部未动。
+
+新增与改动：
+
+| 文件 | 改动 |
+|---|---|
+| `src/translator.py` | 新增 `IndexTranslator`；`BaseTranslator` 加 prompt 组装钩子与 `uses_global_ids`；`translate()` 改为 backend 感知 + 校验/缩批/fallback |
+| `src/index_prompt.py` | **新增**：官方 instTrans prompt 组装（照抄官方客户端格式） |
+| `src/validator.py` | **新增**：译文校验（条数/id/空/Markdown/解释/术语落实/过长） |
+| `src/glossary.py` | 扩展：支持 `dictionary/*.yaml` 分节词典；新增 `match_terms` / `build_glossary_pairs` |
+| `src/config.py` | 新增 Index 全部配置；`VALID_PROVIDERS` 加 `index`；`validate_config` 增加「服务必须在跑」探测 |
+| `app.py` | `/api/health` 增加 `index_service` 与 `glossary` 自检 |
+| `web/templates/index.html` | 下拉加 Index 选项；选本地引擎时禁用 API Key 框并说明原因 |
+| `dictionary/*.yaml` | **新增** 7 个词典文件（general / internet / idol / love_live / groups / members / custom） |
+| `docs/index-translate.md` | **新增**：WSL2 + vLLM 部署、术语表、排错、验收清单 |
+| `tests/translation/`、`tests/benchmark/` | **新增**：用例跑批器与 Index/DeepSeek 对比基准 |
+| `_test_index_backend.py` | **新增** 70 条断言 |
+
+**几个刻意的设计选择：**
+
+1. **按 id 映射，不按下标**。原实现是 `translations[i]`，模型少给一条会让
+   后面所有字幕整体错位（错得无声无息）。现在 Index 用全局 id、其余后端
+   用批内下标，都走 `_map_by_id`；id 认不出来才退回位置映射。
+2. **传输重试与校验重试分开**。各 backend 的 `translate_batch` 内部已经做了
+   超时/5xx 退避重试；`_translate_chunk` 再包一层会变成 3×3 次调用，
+   让「服务没起」这种确定性故障白等 9 轮。所以异常直接上抛，
+   只有**校验不通过**才重试，重试仍不过则**缩批**。
+3. **过长不截断**。任务要求明确：截断会吃掉句子成分且看起来「正常」。
+   超过 `INDEX_MAX_LENGTH_RATIO` 时另发一次压缩请求。
+4. **`.env` 里的 `TRANSLATION_PROVIDER=deepseek` 没有被改动**。
+   改的是**代码默认值**（现在是 index）与 `.env.example`。
+   保留用户现有配置不动，避免「升级后任务直接跑不起来」——
+   想切到 Index 在网页下拉里选一下即可。
+
+**验证**（本机无 NVIDIA GPU，能测的都测了）：
+
+- `_test_index_backend.py` **70/70** —— 起一个真实的 OpenAI 兼容 HTTP 服务，
+  让 openai SDK、prompt 组装、校验、重试、缩批、fallback 全走真实代码路径
+- 十套回归测试 **399 passed, 0 failed**
+- 官方 API 细节（模型 ID / vLLM 命令 / 参数默认值 / glossary 格式）**照抄官方
+  README**，不是猜测
+
+**未验证**（本机没有 GPU，不编数字）：RTX 5060 上的实际显存占用、
+单批翻译速度、真实翻译质量。`docs/index-translate.md` 里列了验收清单。
 
 ### 2026-10-04 — 输出格式清单：后端产出 5 种，前端按钮手写一份
 

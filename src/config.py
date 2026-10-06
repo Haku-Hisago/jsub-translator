@@ -150,14 +150,85 @@ def _default_model_dir() -> Path:
     return ROOT_DIR / "models"
 
 # --- Translation Provider ---
-# "deepseek" or "anthropic"
-TRANSLATION_PROVIDER = os.getenv("TRANSLATION_PROVIDER", "deepseek")
+# "index"（本地 Index-Translate-2B，默认）| "deepseek" | "anthropic"
+#
+# 默认已改为 index：本地推理、零 API 费用、术语可控。
+# 若本地服务没起，不会静默失败 —— 会给出明确提示（见 validate_config）。
+# 想切回云端，在 .env 里写一行 TRANSLATION_PROVIDER=deepseek 即可。
+TRANSLATION_PROVIDER = os.getenv("TRANSLATION_PROVIDER", "index")
 
 # 可用的翻译引擎。**只在这里定义一次。**
 # 之前这份清单被抄了四份：resolve_api_key / validate_config 各写一遍 if/elif，
 # translator.create_translator 又写一遍，网页的 <option> 还是手写死的 ——
 # 加第三个引擎要改四处，漏一处就是「后端支持但界面选不到」或「校验过了却拿不到翻译器」。
-VALID_PROVIDERS = ("deepseek", "anthropic")
+VALID_PROVIDERS = ("index", "deepseek", "anthropic")
+
+# --- Index-Translate (本地 vLLM) ---
+#
+# 官方仓库：https://github.com/bilibili/Index-Translate
+# 模型：IndexTeam/Index-Translate-2B（基于 Qwen3.5）
+#
+# 起服务（WSL2 / Linux，需带 Qwen3.5 支持的 vLLM）：
+#     vllm serve IndexTeam/Index-Translate-2B \
+#         --host 127.0.0.1 --port 8000 --max-model-len 4096
+# 官方默认 4096 是短文本示例值；本项目按批翻译、上下文较长，
+# 建议按官方部署预设提到 32768（见 docs/index-translate.md）。
+#
+# 服务是 OpenAI 兼容接口，因此直接复用 openai SDK，不需要额外依赖。
+INDEX_BASE_URL = os.getenv("INDEX_BASE_URL", "http://127.0.0.1:8000/v1").strip()
+
+# 本地 vLLM 不校验 key，官方约定填 EMPTY。**这不是密钥**，不要往里填真 key。
+INDEX_API_KEY = os.getenv("INDEX_API_KEY", "EMPTY").strip() or "EMPTY"
+
+# 模型 ID 必须与服务端 /v1/models 返回的一致。
+# 官方 serve 命令用的就是 IndexTeam/Index-Translate-2B。
+# 若你部署的是量化版（如 -FP8），改这里即可。
+INDEX_MODEL = os.getenv("INDEX_MODEL", "IndexTeam/Index-Translate-2B").strip()
+
+# 官方默认 max_tokens=1024（Translate 系列）；temperature=0 贪心解码。
+INDEX_MAX_TOKENS = _env_int("INDEX_MAX_TOKENS", 1024)
+INDEX_TEMPERATURE = _env_float("INDEX_TEMPERATURE", 0.0)
+
+# 本地推理可能较慢（尤其首次加载/长批），超时给宽一些
+INDEX_TIMEOUT = _env_int("INDEX_TIMEOUT", 300)
+
+# 是否要求模型跳过思维链。官方默认 enable_thinking=False。
+INDEX_ENABLE_THINKING = os.getenv("INDEX_ENABLE_THINKING", "false").lower() in (
+    "1", "true", "yes", "on",
+)
+
+# 每批字幕条数。官方未限定；10~30 是准确性与吞吐的平衡区。
+INDEX_BATCH_SIZE = _env_int("INDEX_BATCH_SIZE", 20)
+
+# 批与批之间携带的上下文条数（只用于理解语境，模型不翻译它们）。
+# before = 已翻好的前文；after = 尚未翻译的后文（只给模型看，不要求它翻）。
+INDEX_CONTEXT_BEFORE = _env_int("INDEX_CONTEXT_BEFORE", 3)
+INDEX_CONTEXT_AFTER = _env_int("INDEX_CONTEXT_AFTER", 3)
+
+# 术语表（dynamic glossary）
+INDEX_GLOSSARY_ENABLED = os.getenv("INDEX_GLOSSARY_ENABLED", "true").lower() in (
+    "1", "true", "yes", "on",
+)
+# 词典目录（相对基准目录解析）。目录下所有 *.yaml / *.yml 都会被加载。
+INDEX_GLOSSARY_DIRS = os.getenv("INDEX_GLOSSARY_DIRS", "dictionary").strip()
+
+# 译文校验与重试
+INDEX_VALIDATION_ENABLED = os.getenv("INDEX_VALIDATION_ENABLED", "true").lower() in (
+    "1", "true", "yes", "on",
+)
+# 校验不通过时的重试次数（0 = 只校验不重试）
+INDEX_VALIDATION_RETRY = _env_int("INDEX_VALIDATION_RETRY", 2)
+
+# 字幕长度上限（相对日文原文的字符数倍率）。超过则请求模型压缩。
+# 中文通常比日文短，1.8 倍已相当宽松，只拦「明显啰嗦」的情况。
+INDEX_MAX_LENGTH_RATIO = _env_float("INDEX_MAX_LENGTH_RATIO", 1.8)
+
+# --- Fallback（翻译失败时改用的备用引擎）---
+# 默认**关闭**：只有用户主动打开才会去调用云端 API（会产生费用）。
+FALLBACK_ENABLED = os.getenv("FALLBACK_ENABLED", "false").lower() in (
+    "1", "true", "yes", "on",
+)
+FALLBACK_PROVIDER = os.getenv("FALLBACK_PROVIDER", "deepseek").strip().lower()
 
 # --- DeepSeek API ---
 # 注意：占位符（sk-your-deepseek-key-here）会被当成「未配置」处理为 ""，
@@ -362,11 +433,48 @@ def resolve_api_key(provider: Optional[str] = None, api_key: Optional[str] = Non
     provider = (provider or TRANSLATION_PROVIDER).lower().strip()
     if api_key and api_key.strip():
         return api_key.strip()
+    if provider == "index":
+        return INDEX_API_KEY
     if provider == "deepseek":
         return DEEPSEEK_API_KEY
     if provider == "anthropic":
         return ANTHROPIC_API_KEY
     return ""
+
+
+def probe_index_service(timeout: float = 3.0) -> tuple[bool, str, list[str]]:
+    """探测本地 Index-Translate 服务是否在跑。
+
+    返回 (可用, 说明, 模型ID列表)。
+
+    为什么要单独探一次：本地服务没起时，openai SDK 抛的是
+    `APIConnectionError` / `Connection refused`，用户看到这行字完全不知道
+    该怎么办。这里提前问一句 `/v1/models`，把「连不上」翻译成
+    「你的本地服务没启动，请先跑 vllm serve ...」。
+
+    用标准库 urllib 而不是 openai/httpx：这只是个健康检查，
+    不该为此付出 import 依赖的代价，也不该受 SDK 重试策略影响。
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    url = INDEX_BASE_URL.rstrip("/") + "/models"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {INDEX_API_KEY}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = _json.loads(resp.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        return False, f"服务有响应但返回 HTTP {e.code}", []
+    except Exception as e:  # noqa: BLE001 - 连接类错误种类多，统一成一句人话
+        return False, f"无法连接（{type(e).__name__}）", []
+
+    ids: list[str] = []
+    if isinstance(payload, dict):
+        for item in payload.get("data") or []:
+            if isinstance(item, dict) and item.get("id"):
+                ids.append(str(item["id"]))
+    return True, "服务在线", ids
 
 
 def validate_config(provider: Optional[str] = None, api_key: Optional[str] = None):
@@ -379,7 +487,31 @@ def validate_config(provider: Optional[str] = None, api_key: Optional[str] = Non
     """
     provider = (provider or TRANSLATION_PROVIDER).lower().strip()
 
-    if provider == "deepseek":
+    if provider == "index":
+        # 本地服务不需要 API Key，但**必须真的在跑**。
+        # 这里不抛 Connection refused 那种天书，而是给出可直接照做的提示。
+        ok, detail, model_ids = probe_index_service()
+        if not ok:
+            raise ValueError(
+                "Index-Translate service is not running.\n"
+                f"  预期地址：{INDEX_BASE_URL}\n"
+                f"  探测结果：{detail}\n"
+                "  请先启动本地 Index-Translate-2B 服务：\n"
+                "    vllm serve IndexTeam/Index-Translate-2B "
+                "--host 127.0.0.1 --port 8000 --max-model-len 32768\n"
+                "  部署步骤见 docs/index-translate.md。\n"
+                "  若想改用云端引擎，在 .env 里设置 TRANSLATION_PROVIDER=deepseek。"
+            )
+        # 服务在线但模型名对不上 → 这是最容易踩的坑（模型名写错时
+        # 请求会回 404 model not found，同样很难懂）。顺手校验一下。
+        if model_ids and INDEX_MODEL not in model_ids:
+            raise ValueError(
+                f"本地服务已启动，但没有名为 '{INDEX_MODEL}' 的模型。\n"
+                f"  服务实际提供：{', '.join(model_ids)}\n"
+                f"  请把 .env 里的 INDEX_MODEL 改成上面之一，"
+                f"或按该名称重新部署模型。"
+            )
+    elif provider == "deepseek":
         if not resolve_api_key(provider, api_key):
             raise ValueError(
                 "未配置 DeepSeek API Key。请在网页「API Key」输入框填入，"

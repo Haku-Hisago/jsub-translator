@@ -221,19 +221,20 @@ for t in _test_*.py; do        # 自动包含新增的测试文件，无需改�
 done
 ```
 
-预期：**326 passed, 0 failed**。
+预期：**399 passed, 0 failed**。
 
 | 文件 | 断言数 | 守什么 |
 |---|---|---|
 | `_test_ass_alignment.py` | 63 | 说话人样式对齐（5 种模式）；**预览颜色/缩写名与 ASS 同源**、调色板不含纯白；花括号必须转义；配色唯一一份且跨进程稳定 |
 | `_test_path_resolution.py` | 47 | `OUTPUT_DIR`/`MODEL_DIR` 不随 CWD 变化（4 个 CWD 验证）；**`.env` 的 `MODEL_DIR` 必须指向真有模型的目录**；**下载的视频只落 OUTPUT_DIR 一份** |
 | `_test_diarization_logic.py` | 24 | 说话人归属、跨说话人切分、词级对齐校验（离线，不需要音频）|
-| `_test_api_key_resolution.py` | 47 | 占位符识别、`.env` 加载顺序、`/api/*` 必回 JSON、`/api/health` 不泄露 key |
+| `_test_api_key_resolution.py` | 49 | 占位符识别、`.env` 加载顺序、`/api/*` 必回 JSON、`/api/health` 不泄露 key |
 | `_test_downloader_cookies.py` | 44 | 下载模块：cookies 配置与优先级、`cookie_status()` 自检、认证类错误识别与提示；**ffmpeg 查找与 audio 同源**；原有本地文件/URL 判定不受影响 |
 | `_test_cache_safety.py` | 27 | **删除路径安全**：盘根/系统目录误配必须拒绝清理、删除不越界、绝不删 OUTPUT_DIR 本身；**网页 accept 与 MEDIA_EXTS 必须一致** |
 | `_test_job_lifecycle.py` | 28 | **任务内存回收**：已结束任务按上限淘汰、运行中任务永不淘汰、按结束顺序淘汰；**失败任务必须报 error 而非永远 running**；**SSE 重连补发终结事件** |
 | `_test_translate_resilience.py` | 36 | **翻译容错**：401/403/400 不重试、可恢复错误重试到上限、连续失败提前中止、中途恢复不误判；**失败用布尔字段而非字符串匹配** |
-| `_test_docs_links.py` | 10 | **文档不腐烂**：跨文件相对链接可解析、文内 `#锚点` 与标题 slug 一致、TROUBLESHOOTING 每个编号章节都已进快速索引 |
+| `_test_docs_links.py` | 11 | **文档不腐烂**：跨文件相对链接可解析、文内 `#锚点` 与标题 slug 一致、TROUBLESHOOTING 每个编号章节都已进快速索引 |
+| `_test_index_backend.py` | 70 | **本地 Index-Translate 接入**：instTrans prompt 结构、动态 glossary 只注入命中项、按 id 映射（不是下标）、校验器逐条规则、缩批重试、过长压缩、fallback 开关、服务未启动时的人话报错。用**真实 HTTP 服务**跑通全链路（模型是假的） |
 
 ### 4.2 手动冒烟（端到端）
 

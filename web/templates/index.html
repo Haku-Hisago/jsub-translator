@@ -606,7 +606,8 @@ svg{display:block}
             <select id="provider-select" class="sel">
               {# 可选引擎由服务端下发（config.VALID_PROVIDERS），这里不再手写一份。
                  标签属展示文案，留在这里；新引擎没配标签时退回显示引擎名。 #}
-              {% set labels = {'deepseek': 'DeepSeek · 便宜快速（推荐）',
+              {% set labels = {'index': 'Index-Translate-2B · 本地（推荐）',
+                               'deepseek': 'DeepSeek · 便宜快速',
                                'anthropic': 'Anthropic Claude · 质量优先'} %}
               {% for p in providers %}
               <option value="{{ p }}"{% if p == default_provider %} selected{% endif %}>{{ labels.get(p, p) }}</option>
@@ -719,15 +720,29 @@ let eventSource = null;
 const APIKEY_STORAGE = 'jsub_api_key';
 
 function providerLabel(p) {
-  return p === 'anthropic' ? 'Anthropic' : 'DeepSeek';
+  /* 与 <option> 的文案同源；认不出来的引擎退回显示引擎名本身，
+     免得以后加了新后端这里静默显示成别的引擎。 */
+  const names = { index: 'Index-Translate', deepseek: 'DeepSeek', anthropic: 'Anthropic' };
+  return names[p] || p;
 }
 
 function updateApiKeyHint() {
   const p = document.getElementById('provider-select').value;
   const input = document.getElementById('apikey-input');
+  const hint = document.getElementById('apikey-hint');
+  const isLocal = (p === 'index');
+
+  /* 本地引擎不需要 Key：禁用输入框并说明原因，
+     而不是留一个空白框让用户以为「这里也得填」。 */
+  input.disabled = isLocal;
+  if (isLocal) {
+    input.placeholder = '本地引擎无需 Key';
+    hint.textContent = '本地 Index-Translate 服务，无需 API Key。'
+      + '请确认已启动 vllm serve（见 docs/index-translate.md）。';
+    return;
+  }
   input.placeholder = (p === 'anthropic') ? 'sk-ant-...' : 'sk-...';
-  document.getElementById('apikey-hint').textContent =
-    providerLabel(p) + ' Key，留空则使用 .env 中的配置。仅保存在本机浏览器。';
+  hint.textContent = providerLabel(p) + ' Key，留空则使用 .env 中的配置。仅保存在本机浏览器。';
 }
 
 function saveApiKey() {

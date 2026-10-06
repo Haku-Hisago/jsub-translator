@@ -15,16 +15,19 @@
 
 ### 项目简介
 
-jsub-translator 是一款**本地运行**的日语视频字幕翻译工具：把 YouTube / Niconico 链接或本地视频先转写成日文时间轴，再用大语言模型翻译为中文，最终生成带说话人分色的 ASS 字幕文件。除调用翻译 API 外，整个流程在本地完成，**不会上传原始视频**。
+jsub-translator 是一款**本地运行**的日语视频字幕翻译工具：把 YouTube / Niconico 链接或本地视频先转写成日文时间轴，再用**本地**大语言模型（Index-Translate-2B）翻译为中文，最终生成带说话人分色的 ASS 字幕文件。默认配置下整个流程**完全在本地完成**，原始视频和字幕都不会离开你的机器。
 
 ### 主要功能
 
 - **多模型转录**：默认 `large-v3-turbo` 作为主识别 + `medium` 交叉比对，时间轴由主模型决定、文本由多模型投票融合
 - **说话人识别**：基于 sherpa-onnx 的离线 diarization，自动给不同说话人配上区分色
+- **本地翻译引擎**：默认 Index-Translate-2B（B站官方模型，vLLM 本地推理，零 API 费用）；也可一键切回 DeepSeek / Anthropic 云端
+- **术语表（Glossary）**：`dictionary/*.yaml` 分主题词典，只把本批命中的术语作为**硬约束**下发给模型，人名团名不被擅自改写
+- **译文校验**：条数/id 对应/空译文/Markdown/解释文字/术语落实逐条检查，不过则重试、缩批，而不是把错译文静默写进字幕
 - **多种字幕格式**：双语合并、双语分轨、日文单轨、中文单轨、说话人分色双语
 - **多种输入**：YouTube / Niconico 链接（自动下载）或本地视频文件
 - **Web 界面**：Flask 单页 UI，双击启动后浏览器自动打开，无需安装客户端
-- **9 套回归测试 / 326 条断言**（参见 `AGENTS.md`）
+- **10 套回归测试 / 399 条断言**（参见 `AGENTS.md`）
 
 ### 安装与使用
 
@@ -60,7 +63,16 @@ copy .env.example .env     # Windows
 python app.py
 ```
 
-浏览器自动打开 `http://127.0.0.1:7860`，网页右上角填入 API Key → 选择视频链接或本地文件 → 点「开始处理」。
+浏览器自动打开 `http://127.0.0.1:7860`。
+
+**默认引擎是本地 Index-Translate-2B**，需要先起本地服务（WSL2 + vLLM，见 [`docs/index-translate.md`](docs/index-translate.md)）：
+
+```bash
+vllm serve IndexTeam/Index-Translate-2B --host 127.0.0.1 --port 8000 --max-model-len 32768
+```
+
+然后：选视频链接或本地文件 → 点「开始处理」。
+不想装本地服务的话，在「翻译引擎」下拉里换成 DeepSeek 并填入 API Key 即可。
 
 ### 目录结构
 
@@ -92,8 +104,12 @@ python app.py
 │   ├── TROUBLESHOOTING.md
 │   ├── STATE.md
 │   └── screenshots/      UI 截图
+├── dictionary/          术语表（*.yaml，分 terms / people / groups 三节）
+├── tests/
+│   ├── translation/     翻译用例跑批器
+│   └── benchmark/       Index vs DeepSeek 对比基准
 ├── tools/               维护用脚本（ASS 对齐修复等）
-├── _test_*.py           9 套回归测试（326 条断言）
+├── _test_*.py           10 套回归测试（399 条断言）
 └── .env.example         配置模板（不要提交 .env）
 ```
 
@@ -103,16 +119,19 @@ python app.py
 
 ### 專案簡介
 
-jsub-translator 是一款**本地運行**的日語影片字幕翻譯工具：將 YouTube / Niconico 連結或本地影片先轉寫為日文時間軸，再用大型語言模型翻譯為中文，最終產生帶說話人分色的 ASS 字幕檔。除了呼叫翻譯 API 之外，整個流程都在本地完成，**不會上傳原始影片**。
+jsub-translator 是一款**本地運行**的日語影片字幕翻譯工具：將 YouTube / Niconico 連結或本地影片先轉寫為日文時間軸，再用**本地**大型語言模型（Index-Translate-2B）翻譯為中文，最終產生帶說話人分色的 ASS 字幕檔。預設設定下整個流程**完全在本地完成**，原始影片與字幕都不會離開你的機器。
 
 ### 主要功能
 
 - **多模型轉寫**：預設 `large-v3-turbo` 主辨識 + `medium` 交叉比對，時間軸由主模型決定、文本由多模型投票融合
 - **說話人辨識**：基於 sherpa-onnx 的離線 diarization，自動為不同說話人配上區分色
+- **本地翻譯引擎**：預設 Index-Translate-2B（B站官方模型，vLLM 本地推理，零 API 費用）；也可一鍵切回 DeepSeek / Anthropic 雲端
+- **術語表（Glossary）**：`dictionary/*.yaml` 分主題詞典，只把本批命中的術語作為**硬約束**下發給模型，人名團名不被擅自改寫
+- **譯文校驗**：條數/id 對應/空譯文/Markdown/解釋文字/術語落實逐條檢查，不過則重試、縮批，而不是把錯譯文靜默寫進字幕
 - **多種字幕格式**：雙語合併、雙語分軌、日文單軌、中文單軌、說話人分色雙語
 - **多種輸入**：YouTube / Niconico 連結（自動下載）或本地影片檔
 - **Web 介面**：Flask 單頁 UI，雙擊啟動後瀏覽器自動開啟，無需安裝用戶端
-- **9 套回歸測試 / 326 條斷言**（參見 `AGENTS.md`）
+- **10 套回歸測試 / 399 條斷言**（參見 `AGENTS.md`）
 
 ### 安裝與使用
 
@@ -148,7 +167,16 @@ copy .env.example .env     # Windows
 python app.py
 ```
 
-瀏覽器自動開啟 `http://127.0.0.1:7860`，於網頁右上角填入 API Key → 選擇影片連結或本地檔案 → 點「開始處理」。
+瀏覽器自動開啟 `http://127.0.0.1:7860`。
+
+**預設引擎是本地 Index-Translate-2B**，需先啟動本地服務（WSL2 + vLLM，見 [`docs/index-translate.md`](docs/index-translate.md)）：
+
+```bash
+vllm serve IndexTeam/Index-Translate-2B --host 127.0.0.1 --port 8000 --max-model-len 32768
+```
+
+然後：選擇影片連結或本地檔案 → 點「開始處理」。
+不想裝本地服務的話，在「翻譯引擎」下拉選單換成 DeepSeek 並填入 API Key 即可。
 
 ### 目錄結構
 
@@ -180,8 +208,12 @@ python app.py
 │   ├── TROUBLESHOOTING.md
 │   ├── STATE.md
 │   └── screenshots/      UI 截圖
+├── dictionary/          術語表（*.yaml，分 terms / people / groups 三節）
+├── tests/
+│   ├── translation/     翻譯用例跑批器
+│   └── benchmark/       Index vs DeepSeek 對比基準
 ├── tools/               維護用腳本（ASS 對齊修復等）
-├── _test_*.py           9 套回歸測試（326 條斷言）
+├── _test_*.py           10 套回歸測試（399 條斷言）
 └── .env.example         設定範本（不要提交 .env）
 ```
 
@@ -191,16 +223,19 @@ python app.py
 
 ### Project Overview
 
-jsub-translator is a **locally-run** subtitle translator for Japanese videos. It transcribes YouTube / Niconico links or local files into Japanese timings, then translates them into Chinese with a large language model, and finally writes ASS subtitle files with per-speaker colors. Apart from calling the translation API, the entire pipeline runs on your machine — **the source video is never uploaded**.
+jsub-translator is a **locally-run** subtitle translator for Japanese videos. It transcribes YouTube / Niconico links or local files into Japanese timings, then translates them into Chinese with a **local** large language model (Index-Translate-2B), and finally writes ASS subtitle files with per-speaker colors. With the default configuration the whole pipeline runs **entirely on your machine** — neither the video nor the subtitles ever leave your computer.
 
 ### Key Features
 
 - **Multi-model transcription** — `large-v3-turbo` is the primary model, with `medium` cross-checking in parallel. The primary model owns timings; the text is fused from multiple model votes
 - **Speaker diarization** — offline diarization powered by sherpa-onnx, with a deterministic palette that distinguishes each speaker
+- **Local translation engine** — Index-Translate-2B by default (Bilibili's official model, served locally via vLLM, zero API cost); switch back to DeepSeek / Anthropic in one click
+- **Glossary** — topic-split YAML dictionaries under `dictionary/`; only the terms actually present in a batch are sent to the model, as **hard constraints**, so names and group names are never rewritten
+- **Translation validation** — count / id mapping / empty output / Markdown / explanatory text / glossary compliance are all checked; failures trigger a retry and batch shrinking instead of silently writing bad subtitles
 - **Multiple subtitle formats** — bilingual merged, bilingual split (separate JP / CN lines), Japanese-only, Chinese-only, and per-speaker colored bilingual
 - **Flexible input** — YouTube / Niconico links (auto-downloaded) or local video files
 - **Web UI** — Flask single-page UI; browser opens automatically when launched, no client install required
-- **9 regression suites / 326 assertions** (see `AGENTS.md`)
+- **10 regression suites / 399 assertions** (see `AGENTS.md`)
 
 ### Installation & Usage
 
@@ -236,7 +271,16 @@ copy .env.example .env     # Windows
 python app.py
 ```
 
-Your browser opens `http://127.0.0.1:7860` automatically. Fill in the API Key at the top right, choose a video link or a local file, and click "Start".
+Your browser opens `http://127.0.0.1:7860` automatically.
+
+**The default engine is the local Index-Translate-2B**, so start the local server first (WSL2 + vLLM, see [`docs/index-translate.md`](docs/index-translate.md)):
+
+```bash
+vllm serve IndexTeam/Index-Translate-2B --host 127.0.0.1 --port 8000 --max-model-len 32768
+```
+
+Then choose a video link or a local file and click "Start".
+If you would rather not run a local server, pick DeepSeek in the "Translation Backend" dropdown and enter an API Key instead.
 
 ### Directory Structure
 
@@ -268,8 +312,12 @@ Your browser opens `http://127.0.0.1:7860` automatically. Fill in the API Key at
 │   ├── TROUBLESHOOTING.md
 │   ├── STATE.md
 │   └── screenshots/      UI screenshots
+├── dictionary/          Glossaries (*.yaml with terms / people / groups sections)
+├── tests/
+│   ├── translation/     Translation case runner
+│   └── benchmark/       Index vs DeepSeek benchmark
 ├── tools/               Maintenance scripts (ASS alignment repair, etc.)
-├── _test_*.py           9 regression suites (326 assertions)
+├── _test_*.py           10 regression suites (399 assertions)
 └── .env.example         Config template (do NOT commit .env)
 ```
 
@@ -279,16 +327,19 @@ Your browser opens `http://127.0.0.1:7860` automatically. Fill in the API Key at
 
 ### プロジェクト概要
 
-jsub-translator は**ローカル実行型**の日本語動画字幕翻訳ツールです。YouTube / Niconico のリンクまたはローカル動画を、まず日本語のタイミングへ文字起こしし、続いて大規模言語モデルで中国語へ翻訳、最後に話者別の色分け付き ASS 字幕ファイルを生成します。翻訳 API の呼び出しを除き、工程はすべてローカルで実行され、**元動画が外部へ送信されることはありません**。
+jsub-translator は**ローカル実行型**の日本語動画字幕翻訳ツールです。YouTube / Niconico のリンクまたはローカル動画を、まず日本語のタイミングへ文字起こしし、続いて**ローカル**の大規模言語モデル（Index-Translate-2B）で中国語へ翻訳、最後に話者別の色分け付き ASS 字幕ファイルを生成します。既定の設定では工程のすべてが**完全にローカル**で実行され、元動画も字幕も外部へ送信されません。
 
 ### 主な機能
 
 - **複数モデルでの文字起こし** — 主モデル `large-v3-turbo` と並列の `medium` で相互検証。タイミングは主モデル、テキストは複数モデルの投票で統合
 - **話者識別** — sherpa-onnx によるオフライン diarization。話者ごとに区別しやすい色を決定論的に割り当て
+- **ローカル翻訳エンジン** — 既定は Index-Translate-2B（Bilibili 公式モデル、vLLM でローカル推論、API 費用ゼロ）。DeepSeek / Anthropic へワンクリックで切り替え可能
+- **用語集（Glossary）** — `dictionary/*.yaml` の分野別辞書。そのバッチに実際に出現した用語だけを**ハード制約**としてモデルへ渡すため、人名・グループ名が勝手に書き換わりません
+- **訳文バリデーション** — 件数 / id 対応 / 空訳 / Markdown / 説明文 / 用語遵守を検査し、不合格なら再試行とバッチ縮小を行います（誤った字幕を黙って書き出しません）
 - **複数の字幕形式** — 二語統合、二語分割（日中別行）、日本語のみ、中国語のみ、話者別色分け二語
 - **多様な入力** — YouTube / Niconico のリンク（自動ダウンロード）またはローカル動画ファイル
 - **Web UI** — Flask の単一ページ UI。起動時にブラウザが自動で開き、クライアントのインストールは不要
-- **回帰テスト 9 スイート / 326 アサーション**（`AGENTS.md` を参照）
+- **回帰テスト 10 スイート / 399 アサーション**（`AGENTS.md` を参照）
 
 ### インストールと使い方
 
@@ -324,7 +375,16 @@ copy .env.example .env     # Windows
 python app.py
 ```
 
-ブラウザが自動で `http://127.0.0.1:7860` を開きます。右上の API Key 欄に記入 → 動画リンクかローカルファイルを選択 →「開始処理」をクリック。
+ブラウザが自動で `http://127.0.0.1:7860` を開きます。
+
+**既定のエンジンはローカルの Index-Translate-2B** です。先にローカルサービスを起動してください（WSL2 + vLLM、[`docs/index-translate.md`](docs/index-translate.md) 参照）：
+
+```bash
+vllm serve IndexTeam/Index-Translate-2B --host 127.0.0.1 --port 8000 --max-model-len 32768
+```
+
+その後、動画リンクかローカルファイルを選択 →「開始処理」をクリック。
+ローカルサービスを用意しない場合は、「翻訳エンジン」のドロップダウンで DeepSeek を選び API Key を入力してください。
 
 ### ディレクトリ構成
 
@@ -356,8 +416,12 @@ python app.py
 │   ├── TROUBLESHOOTING.md
 │   ├── STATE.md
 │   └── screenshots/      UI スクリーンショット
+├── dictionary/          用語集（*.yaml、terms / people / groups の3節）
+├── tests/
+│   ├── translation/     翻訳ケース実行スクリプト
+│   └── benchmark/       Index vs DeepSeek 比較ベンチマーク
 ├── tools/               メンテナンス用スクリプト（ASS 位置修正など）
-├── _test_*.py           回帰テスト 9 スイート（326 アサーション）
+├── _test_*.py           回帰テスト 10 スイート（399 アサーション）
 └── .env.example         設定テンプレート（.env はコミットしない）
 ```
 

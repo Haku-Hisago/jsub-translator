@@ -47,7 +47,7 @@
 | 输出目录（EXE 版） | `<root>\dist\output` |
 | 模型目录 | `<root>\models`（**3.5 GB**：small / medium / large-v3-turbo） |
 | 自检端点 | `http://127.0.0.1:7860/api/health` |
-| 测试 | 9 个 `_test_*.py`，共 **326** 条断言，必须全绿 |
+| 测试 | 10 个 `_test_*.py`，共 **399** 条断言，必须全绿 |
 
 ---
 
@@ -108,6 +108,7 @@
 | `docs/ARCHITECTURE.md` | 架构、数据流、模块契约、进度模型 |
 | `docs/DEVELOPMENT.md` | 环境、运行、测试、构建、发布 |
 | `docs/TROUBLESHOOTING.md` | **排查手册**：症状 → 原因 → 修复 |
+| `docs/index-translate.md` | **本地 Index-Translate-2B 部署**（WSL2 + vLLM、术语表、排错、验收清单）|
 | `docs/STATE.md` | 当前状态、待办、最近变更（**可写**） |
 
 ---

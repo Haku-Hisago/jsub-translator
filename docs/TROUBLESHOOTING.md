@@ -664,7 +664,7 @@ Get-NetTCPConnection -LocalPort 7860 -State Listen -ErrorAction SilentlyContinue
 
 改完代码，发布前过一遍：
 
-- [ ] 9 个测试文件全绿（**326 passed, 0 failed**）
+- [ ] 9 个测试文件全绿（**399 passed, 0 failed**）
 - [ ] `grep -n "resp.json()" web/templates/index.html` 只剩被 try 包住的那处
 - [ ] 新增的 `/api/*` 路由都走 `_json_error()`
 - [ ] `src/` 下没有备份文件

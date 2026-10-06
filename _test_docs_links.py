@@ -32,6 +32,7 @@ DOCS = [
     "docs/DEVELOPMENT.md",
     "docs/TROUBLESHOOTING.md",
     "docs/STATE.md",
+    "docs/index-translate.md",
 ]
 
 

@@ -1,0 +1,73 @@
+# 团体名（固定译名，优先于模型自由翻译）
+#
+# 铁律（任务 #11）：
+#   · 不擅自汉化官方名称
+#   · 不随意改变大小写
+#   · 不破坏 iLiFE! / =LOVE 这类带符号的名字
+#   · 不因为上下文改变固定译名
+#
+# 所以这里的 zh 值通常**和日文原名完全相同** —— 这正是「原样保留」的表达方式。
+# 加进来而不是留空，是为了让模型明确知道：这是专有名词，不要翻译、不要改写。
+
+groups:
+  # ── 示例（任务给出的原型）──
+  iLiFE!:
+    zh: iLiFE!
+  =LOVE:
+    zh: =LOVE
+
+  # ── 常见日系偶像团体 ──
+  ≠ME:
+    zh: ≠ME
+  ≒JOY:
+    zh: ≒JOY
+  乃木坂46:
+    zh: 乃木坂46
+  櫻坂46:
+    zh: 樱坂46
+  日向坂46:
+    zh: 日向坂46
+  AKB48:
+    zh: AKB48
+  SKE48:
+    zh: SKE48
+  NMB48:
+    zh: NMB48
+  HKT48:
+    zh: HKT48
+  STU48:
+    zh: STU48
+  BABYMETAL:
+    zh: BABYMETAL
+  Perfume:
+    zh: Perfume
+  ももいろクローバーZ:
+    zh: 桃色幸运草Z
+  私立恵比寿中学:
+    zh: 私立惠比寿中学
+  BiSH:
+    zh: BiSH
+  EMPiRE:
+    zh: EMPiRE
+  PassCode:
+    zh: PassCode
+  アンジュルム:
+    zh: ANGERME
+  Juice=Juice:
+    zh: Juice=Juice
+  モーニング娘。:
+    zh: 早安少女组。
+  Hello! Project:
+    zh: Hello! Project
+  BAND-MAID:
+    zh: BAND-MAID
+  結束バンド:
+    zh: 结束乐队
+  Roselia:
+    zh: Roselia
+  Poppin'Party:
+    zh: Poppin'Party
+  MyGO!!!!!:
+    zh: MyGO!!!!!
+  Ave Mujica:
+    zh: Ave Mujica

@@ -231,15 +231,34 @@ def _outcome(fn):
         return "raise"
 
 
-# 真不变量：同一个输入，三处判定必须得出同一个结论
+# 真不变量：同一个输入，三处判定必须得出同一个结论。
+#
+# ⚠️ **index 是刻意的例外**：它的 validate_config 多一道「本地服务必须在跑」的门
+# （见 docs/index-translate.md）。所以 index 不参与下面的三处一致检查，
+# 而是单独断言 —— 否则要么测试在没起 vLLM 时失败，要么这道门形同虚设。
+_cloud_only = [p for p in VALID_PROVIDERS if p != "index"]
 _diverged = []
-for _p in list(VALID_PROVIDERS) + ["deepseek".upper(), " deepseek ", "", None]:
+for _p in _cloud_only + ["deepseek".upper(), " deepseek ", "", None]:
     _a = _outcome(lambda: resolve_api_key(_p))
     _b = _outcome(lambda: validate_config(provider=_p, api_key="sk-x"))
     _c = _outcome(lambda: create_translator(_p))
     if not (_a == _b == _c == "ok"):
         _diverged.append((_p, _a, _b, _c))
-check("合法引擎（含大小写/空格/空串/None）三处判定一致", not _diverged, str(_diverged))
+check("云端引擎（含大小写/空格/空串/None）三处判定一致", not _diverged, str(_diverged))
+
+# index 建翻译器**不依赖**服务是否在跑（连不上应该在调用时给明确提示，
+# 而不是在构造阶段就炸 —— 否则界面连引擎都选不了）。
+check("index 能建出翻译器（不依赖服务是否在跑）",
+      _outcome(lambda: create_translator("index")) == "ok")
+
+# index 的 validate_config：服务在跑就通过，没跑就给出「服务未启动」的人话提示。
+# 两种情况都算对 —— 断言的是「错误类型正确」，不绑定本机环境。
+try:
+    validate_config(provider="index", api_key="")
+    check("index 的 validate_config：服务在跑 → 通过", True)
+except ValueError as _e:
+    check("index 的 validate_config：服务没跑 → 报「服务未启动」而非其它错误",
+          "is not running" in str(_e) and "vllm serve" in str(_e), str(_e)[:140])
 
 # 曾经的空串 bug：validate_config 把 '' 回退成默认引擎（通过），
 # create_translator 却用 `is None` 判断（炸掉）—— 过得了校验，建不出翻译器。

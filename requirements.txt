@@ -5,6 +5,9 @@ anthropic>=0.30.0
 gradio>=4.0.0
 flask>=3.0.0
 python-dotenv>=1.0.0
+# 术语表（dictionary/*.yaml）。缺失时会自动降级到内置词典 + jpop_glossary.json，
+# 不会让程序起不来 —— 但 YAML 词典就用不上了。
+pyyaml>=6.0
 # 说话人识别（声纹分离）。纯 ONNX Runtime、CPU 推理，不需要 torch。
 # 用的是 pyannote segmentation-3.0 的 ONNX 导出 + 3D-Speaker 声纹模型。
 sherpa-onnx>=1.13.8

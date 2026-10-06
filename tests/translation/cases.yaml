@@ -1,0 +1,67 @@
+# 翻译测试用例
+#
+# 覆盖任务要求的八类场景。每条用例可带 `expect_contains`：
+# 译文里**必须出现**的字符串（用于验证术语是否真的落实）。
+#
+# 运行：见同目录 run.py
+
+cases:
+  - id: basic
+    name: 普通日语
+    text: 今日は本当に楽しかった。
+    # 不检查具体措辞（合理译法有多种），只要求非空且不是日文原文
+    expect_contains: []
+
+  - id: colloquial
+    name: 口语
+    text: え、マジで？
+    expect_contains: []
+
+  - id: internet_slang
+    name: 网络词
+    text: 推しが尊すぎる。
+    # 词典里 推し→推、尊すぎる→太尊了，都属硬约束
+    expect_contains: [推, 太尊了]
+
+  - id: idol
+    name: 偶像圈
+    text: レスもらえた！
+    expect_contains: [饭撒回应]
+
+  - id: proper_noun
+    name: 专有名词（不得汉化 / 不得改大小写）
+    text: iLiFE!のライブに行ってきた。
+    expect_contains: [iLiFE!]
+
+  - id: multi_speaker
+    name: 多说话人
+    segments:
+      - speaker: A
+        text: 昨日どうだった？
+      - speaker: B
+        text: めっちゃ楽しかった！
+    expect_contains: []
+
+  - id: long_context
+    name: 长上下文（同一人连续讲话，验证指代与人称一致）
+    segments:
+      - speaker: A
+        text: 私は昨日、初めてライブに行きました。
+      - speaker: A
+        text: そこで推しにレスをもらえたんです。
+      - speaker: A
+        text: それで今日は声が枯れちゃって。
+      - speaker: A
+        text: でも本当に行ってよかったです。
+    expect_contains: [推]
+
+  - id: glossary_strict
+    name: Glossary 严格生效
+    text: 推しと現場とレス、全部大事。
+    expect_contains: [推, 现场, 饭撒回应]
+
+  - id: long_short_pair
+    name: 长句不该被译成啰嗦长句
+    text: 今日は本当にありがとうございました。
+    # 只做长度上限检查（见 run.py 的 max_length_ratio）
+    expect_contains: []
